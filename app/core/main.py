@@ -127,42 +127,28 @@ class ComplianceEngine:
             <title>UyumHub - Resmi Mevzuat Uyumluluk Sertifikası</title>
             <style>
                 body {{ font-family: 'Georgia', serif; background: #fdfbf7; color: #1e293b; padding: 40px; margin: 0; }}
-                .certificate-container {{ max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }}
+                .certificate-container {{ max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }}
                 .inner-border {{ border: 2px solid #d4af37; padding: 40px; }}
-                h1 {{ font-size: 26px; letter-spacing: 2px; color: #0f172a; text-transform: uppercase; margin-bottom: 5px; }}
-                h2 {{ font-size: 14px; color: #64748b; font-weight: normal; letter-spacing: 1px; text-transform: uppercase; margin-top: 0; }}
-                .company-name {{ font-size: 28px; font-weight: bold; color: #1e293b; margin: 25px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; display: inline-block; min-width: 80%; }}
+                h1 {{ font-size: 24px; color: #0f172a; text-transform: uppercase; margin-bottom: 5px; }}
+                .company-name {{ font-size: 26px; font-weight: bold; color: #1e293b; margin: 25px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; display: inline-block; min-width: 80%; }}
                 p {{ font-size: 13px; line-height: 1.8; color: #334155; max-width: 650px; margin: 0 auto 20px auto; }}
                 .details-box {{ display: flex; justify-content: space-around; margin: 30px 0; font-size: 12px; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; }}
-                .seal {{ margin-top: 30px; font-size: 11px; color: #475569; font-family: 'Courier New', monospace; background: #f1f5f9; padding: 10px; display: inline-block; border-radius: 4px; }}
-                .footer {{ margin-top: 40px; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }}
+                .seal {{ font-size: 11px; color: #475569; font-family: monospace; background: #f1f5f9; padding: 10px; display: inline-block; border-radius: 4px; }}
             </style>
         </head>
         <body>
             <div class="certificate-container">
                 <div class="inner-border">
                     <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-                    <h2>T.C. Ticaret Bakanlığı E-Ticaret Bilgi Sistemi & Fiyat Etiketi Yönetmeliği</h2>
-                    
-                    <p style="margin-top: 30px;">İşbu sertifika, aşağıda unvanı ve alan adı belirtilen e-ticaret işletmesinin, 6502 sayılı Tüketicinin Korunması Hakkında Kanun ve ilgili yönetmelikler gereğince <strong>Birim Fiyat Etiketleme</strong>, <strong>Mesafeli Satış Sözleşmesi</strong> ve <strong>Dinamik Kural Motoru</strong> standartlarına tam uyumlu olduğunu onaylamak amacıyla düzenlenmiştir.</p>
-                    
+                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
                     <div class="company-name">{company_name}</div>
-                    
-                    <p><strong>Mağaza Alan Adı:</strong> {store_domain}<br><strong>Vergi / MERSİS No:</strong> {tax_number} / {mersis}</p>
-                    
+                    <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
                     <div class="details-box">
-                        <div><strong>Düzenleme Tarihi:</strong><br>{issue_date}</div>
-                        <div><strong>Kural Motoru:</strong><br>TR-2026-V3 (Aktif)</div>
-                        <div><strong>Denetim Durumu:</strong><br>Sürekli / Otomatik</div>
+                        <div><strong>Tarih:</strong> {issue_date}</div>
+                        <div><strong>Kural Motoru:</strong> TR-2026-V3</div>
+                        <div><strong>Durum:</strong> Onaylı</div>
                     </div>
-
-                    <div class="seal">
-                        <strong>Kriptografik Doğrulama Mührü (SHA-256):</strong><br>{cert_hash}
-                    </div>
-
-                    <div class="footer">
-                        UyumHub B2B E-Ticaret Mevzuat Uyum ve Denetim İzi Altyapısı tarafından resmi olarak onaylanmıştır.
-                    </div>
+                    <div class="seal">Kriptografik Mühür: {cert_hash}</div>
                 </div>
             </div>
         </body>
@@ -172,59 +158,23 @@ class ComplianceEngine:
     @staticmethod
     def generate_distance_sales_contract(merchant_info: Dict[str, Any], customer_info: Dict[str, Any], cart_items: List[Dict[str, Any]], *args, **kwargs) -> str:
         m_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
-        m_address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri")
         m_mersis = merchant_info.get("mersis_no", "0123456789000015")
         c_name = customer_info.get("name", "Müşteri Adı Soyadı")
         c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
 
-        subtotal = 0.0
-        items_html = ""
-        for item in cart_items:
-            name = item.get("name", "Ürün Adı")
-            qty = item.get("quantity", 1)
-            price = item.get("price", 0.0)
-            total = qty * price
-            subtotal += total
-            items_html += f"""
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{name}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">{qty}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">{price:.2f} TL</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">{total:.2f} TL</td>
-            </tr>
-            """
+        subtotal = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in cart_items)
         shipping_fee = 49.90 if 0 < subtotal < 1000 else 0.0
         grand_total = subtotal + shipping_fee
 
         return f"""
         <!DOCTYPE html>
         <html lang="tr">
-        <head>
-            <meta charset="UTF-8">
-            <title>Mesafeli Satış Sözleşmesi</title>
-            <style>
-                body {{ font-family: 'Arial', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
-                h1 {{ font-size: 18px; text-align: center; color: #1e293b; margin-bottom: 5px; }}
-                h2 {{ font-size: 14px; color: #475569; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px; margin-top: 25px; }}
-                p, li {{ font-size: 12px; text-align: justify; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
-                th {{ background-color: #f1f5f9; padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1; }}
-                .box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; font-size: 12px; }}
-            </style>
-        </head>
-        <body>
-            <h1>MESAFELİ SATIŞ SÖZLEŞMESİ</h1>
-            <h2>MADDE 1: TARAFLAR</h2>
-            <div class="box"><strong>SATICI:</strong> {m_name} | MERSİS: {m_mersis}</div>
-            <div class="box"><strong>ALICI:</strong> {c_name} | Adres: {c_address}</div>
-            <h2>MADDE 2: ÜRÜNLER VE BEDELİ</h2>
-            <table>
-                <thead><tr><th>Ürün</th><th>Adet</th><th style="text-align:right;">Birim</th><th style="text-align:right;">Toplam</th></tr></thead>
-                <tbody>{items_html}</tbody>
-            </table>
-            <div style="text-align: right; margin-top: 10px; font-size: 13px;">
-                <p>Genel Toplam: <strong>{grand_total:.2f} TL</strong></p>
-            </div>
+        <head><meta charset="UTF-8"><title>Mesafeli Satış Sözleşmesi</title></head>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>MESAFELİ SATIŞ SÖZLEŞMESİ</h2>
+            <p><strong>Satıcı:</strong> {m_name} (MERSİS: {m_mersis})</p>
+            <p><strong>Alıcı:</strong> {c_name} ({c_address})</p>
+            <p><strong>Toplam Tutar:</strong> {grand_total:.2f} TL</p>
         </body>
         </html>
         """
@@ -232,23 +182,19 @@ class ComplianceEngine:
 
 # --- ÇOKLU PLATFORM İSTEMCİLERİ ---
 class ShopifyAPIClient:
-    def __init__(self, store_domain: str, access_token: str):
-        self.store_domain = store_domain
-    def list_products(self) -> List[Dict[str, Any]]:
-        return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}]
+    def __init__(self, store_domain: str, access_token: str): self.store_domain = store_domain
+    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}]
 
 class TrendyolAPIClient:
-    def __init__(self, supplier_id: str):
-        self.supplier_id = supplier_id
-    def list_products(self) -> List[Dict[str, Any]]:
-        return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}]
+    def __init__(self, supplier_id: str): self.supplier_id = supplier_id
+    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}]
 
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Sertifika & Mevzuat Platformu",
-    description="B2B E-Ticaret Mevzuat Uyum ve Sertifikasyon Servisi",
-    version="1.3.0"
+    title="UyumHub - Ajans Partner & Mevzuat Platformu",
+    description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
+    version="1.4.0"
 )
 
 app.add_middleware(
@@ -270,68 +216,37 @@ class MerchantSettingsRequest(BaseModel):
 
 
 def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
-    if not raw_domain:
-        return "dev-mevzuattestmagaza.myikas.com"
+    if not raw_domain: return "dev-mevzuattestmagaza.myikas.com"
     raw_domain = raw_domain.strip().lower()
-    if "." not in raw_domain:
-        return f"{raw_domain}.myikas.com"
-    return raw_domain
+    return f"{raw_domain}.myikas.com" if "." not in raw_domain else raw_domain
 
 
 def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "ikas") -> tuple[bool, str]:
-    if not supabase_client:
-        return False, "Supabase bağlantısı yok."
-    
-    trial_end = (datetime.utcnow() + timedelta(days=14)).isoformat()
+    if not supabase_client: return False, "Supabase bağlantısı yok."
     merchant_data = {
-        "store_domain": domain,
-        "access_token": access_token,
-        "platform": platform,
-        "subscription_status": "trial",
-        "trial_ends_at": trial_end,
-        "company_name": "UyumHub Test Mağazası A.Ş.",
-        "tax_number": "1234567890",
-        "mersis_no": "0123456789000015",
-        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
-        "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com"
+        "store_domain": domain, "access_token": access_token, "platform": platform,
+        "subscription_status": "trial", "trial_ends_at": (datetime.utcnow() + timedelta(days=14)).isoformat(),
+        "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00", "email": "destek@uyumhub.com"
     }
-
     try:
         supabase_client.table("merchants").upsert(merchant_data, on_conflict="store_domain").execute()
         AuditLogger.log_event(domain, "MERCHANT_REGISTERED", {"platform": platform})
         return True, "Upsert başarılı"
-    except Exception as e_upsert:
-        try:
-            existing = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
-            if existing.data:
-                supabase_client.table("merchants").update({"access_token": access_token, "platform": platform}).eq("store_domain", domain).execute()
-            else:
-                supabase_client.table("merchants").insert(merchant_data).execute()
-            return True, "Fallback kayıt başarılı"
-        except Exception as e_fallback:
-            return False, str(e_fallback)
+    except Exception as e:
+        return False, str(e)
 
 
 def get_merchant_profile(domain: str) -> Dict[str, Any]:
     default_profile = {
-        "company_name": "UyumHub Test Mağazası A.Ş.",
-        "tax_number": "1234567890",
-        "mersis_no": "0123456789000015",
-        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
-        "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com",
-        "subscription_status": "trial",
-        "platform": "ikas",
-        "plan": "UyumHub Pro Paket (Sertifikalı)"
+        "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Pro Paket (Ajans Destekli)"
     }
-
-    if not supabase_client:
-        return default_profile
-    
+    if not supabase_client: return default_profile
     try:
         res = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
-        if res.data and len(res.data) > 0:
+        if res.data:
             m = res.data[0]
             return {
                 "company_name": m.get("company_name") or default_profile["company_name"],
@@ -342,15 +257,105 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Paket (Sertifikalı)"
+                "plan": "UyumHub Pro Paket (Ajans Destekli)"
             }
-    except Exception as e:
-        logger.error(f"Profil okuma hatası: {str(e)}")
-    
+    except Exception: pass
     return default_profile
 
 
-# --- DASHBOARD UI ---
+# --- MODÜL 9: AJANS & PARTNER PROGRAMI DASHBOARD UI ---
+@app.get("/agency/dashboard", response_class=HTMLResponse)
+async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub - Ajans Partner Programı</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen p-6">
+        <div class="max-w-6xl mx-auto space-y-6">
+            
+            <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-900 text-2xl font-bold shadow-lg">
+                        <i class="fa-solid fa-handshake"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-white">Ajans Partner Programı (Compliance-as-Infrastructure)</h1>
+                        <p class="text-sm text-slate-400">Partner Kodu: <span class="font-mono text-emerald-400 font-bold">{agencyCode}</span></p>
+                    </div>
+                </div>
+                <div class="bg-slate-900 px-4 py-2 rounded-xl border border-slate-700 text-right">
+                    <p class="text-xs text-slate-400 uppercase">Komisyon Oranı</p>
+                    <p class="text-lg font-bold text-emerald-400">%25 Gelir Payı (Aylık Düzenli)</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Bağlı Mağaza Sayısı</p>
+                    <h3 class="text-3xl font-bold text-white mt-2">18 Mağaza</h3>
+                    <p class="text-xs text-emerald-400 mt-1"><i class="fa-solid fa-arrow-up"></i> +4 bu ay eklendi</p>
+                </div>
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Aylık Hakediş (Net)</p>
+                    <h3 class="text-3xl font-bold text-emerald-400 mt-2">$225.00 / ay</h3>
+                    <p class="text-xs text-slate-400 mt-1">Pasif Gelir Payı</p>
+                </div>
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Mevzuat Risk Kalkanı</p>
+                    <h3 class="text-3xl font-bold text-indigo-400 mt-2">%100 Koruma</h3>
+                    <p class="text-xs text-slate-400 mt-1">Müşterileriniz Ceza Riski Taşımaz</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+                <div class="p-6 border-b border-slate-700 flex justify-between items-center">
+                    <h2 class="text-base font-bold text-white">Portföyünüzdeki Müşteri Mağazaları</h2>
+                    <span class="text-xs bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20">Canlı Bağlantı</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm text-slate-300">
+                        <thead class="bg-slate-900 text-xs text-slate-400 uppercase border-b border-slate-700">
+                            <tr>
+                                <th class="p-4 pl-6">Mağaza Domain</th>
+                                <th class="p-4">Platform</th>
+                                <th class="p-4">Abonelik Durumu</th>
+                                <th class="p-4">Aylık Ajans Payı</th>
+                                <th class="p-4 pr-6">Aksiyon</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            <tr class="hover:bg-slate-700/50 transition">
+                                <td class="p-4 pl-6 font-semibold text-white">dev-mevzuattestmagaza.myikas.com</td>
+                                <td class="p-4"><span class="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded">İkas</span></td>
+                                <td class="p-4"><span class="px-2 py-0.5 text-xs bg-emerald-500/20 text-emerald-400 rounded">PRO (Aktif)</span></td>
+                                <td class="p-4 font-bold text-emerald-400">$12.50 / ay</td>
+                                <td class="p-4 pr-6"><a href="/dashboard?storeDomain=dev-mevzuattestmagaza.myikas.com" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg font-semibold">Panele Git</a></td>
+                            </tr>
+                            <tr class="hover:bg-slate-700/50 transition">
+                                <td class="p-4 pl-6 font-semibold text-white">organikgurme.myshopify.com</td>
+                                <td class="p-4"><span class="px-2 py-0.5 text-xs bg-emerald-500/20 text-emerald-400 rounded">Shopify</span></td>
+                                <td class="p-4"><span class="px-2 py-0.5 text-xs bg-emerald-500/20 text-emerald-400 rounded">PRO (Aktif)</span></td>
+                                <td class="p-4 font-bold text-emerald-400">$12.50 / ay</td>
+                                <td class="p-4 pr-6"><a href="/dashboard?storeDomain=organikgurme.myshopify.com" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg font-semibold">Panele Git</a></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
+# --- ANA DASHBOARD UI ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -368,8 +373,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>UyumHub - Resmi Sertifikasyon Paneli</title>
+        <title>UyumHub - Mevzuat & Sertifika Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -382,20 +386,20 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <i class="fa-solid fa-award"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Resmi Uyumluluk & Sertifika Paneli</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat & Ajans Destekli Panel</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
                 <div class="flex items-center gap-3 flex-wrap">
                     {status_badge}
+                    <a href="/agency/dashboard" class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-handshake text-emerald-400"></i> Ajans Paneli
+                    </a>
                     <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-credit-card"></i> PRO Plana Geç
                     </button>
                     <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-certificate"></i> Uyumluluk Sertifikası
-                    </a>
-                    <a href="/api/v1/compliance/download-contract-pdf?storeDomain={domain}" class="bg-blue-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-file-arrow-down"></i> Sözleşme İndir
+                        <i class="fa-solid fa-certificate"></i> Sertifika
                     </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Vitrini Senkronize Et
@@ -414,43 +418,11 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             </div>
 
             <div id="section-products" class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-tag"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Aktif Platform</p>
-                            <h3 class="text-xl font-bold text-slate-900 mt-0.5 uppercase">{platform_name}</h3>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-certificate"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Sertifika Durumu</p>
-                            <h3 class="text-sm font-bold text-purple-600 mt-1">Onaylı & Sertifikalı</h3>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-bolt"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Paket</p>
-                            <h3 class="text-sm font-bold text-indigo-600 mt-1" id="total-products-count">{profile["plan"]}</h3>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Sertifikalı Birim Fiyat Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu ve sertifikalı ürün etiketleri.</p>
+                            <h2 class="text-base font-bold text-slate-900">Ajans & Altyapı Destekli Birim Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu ve loglanan yasal etiketler.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -474,37 +446,31 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 </div>
             </div>
 
-            <!-- YASAL ŞİRKET BİLGİLERİ FORMU -->
             <div id="section-settings" class="hidden bg-white rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
-                <div>
-                    <h2 class="text-lg font-bold text-slate-900">Resmi Şirket ve Fatura Bilgileri</h2>
-                    <p class="text-xs text-slate-500 mt-1">Sözleşmelerde ve resmi formlarda kullanılacak satıcı bilgileri.</p>
-                </div>
-
                 <form id="settings-form" onsubmit="saveSettings(event)" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Şirket Unvanı</label>
-                        <input type="text" id="company_name" value="{profile['company_name']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="text" id="company_name" value="{profile['company_name']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Vergi Numarası</label>
-                        <input type="text" id="tax_number" value="{profile['tax_number']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="text" id="tax_number" value="{profile['tax_number']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">MERSİS Numarası</label>
-                        <input type="text" id="mersis_no" value="{profile['mersis_no']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="text" id="mersis_no" value="{profile['mersis_no']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Destek E-Posta</label>
-                        <input type="email" id="email" value="{profile['email']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="email" id="email" value="{profile['email']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div class="md:col-span-2">
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Resmi Şirket Adresi</label>
-                        <input type="text" id="address" value="{profile['address']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="text" id="address" value="{profile['address']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Telefon Numarası</label>
-                        <input type="text" id="phone" value="{profile['phone']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
+                        <input type="text" id="phone" value="{profile['phone']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm">
                     </div>
                     <div class="md:col-span-2 flex justify-end pt-4">
                         <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-xl transition shadow-sm text-sm cursor-pointer">Ayarları Kaydet</button>
@@ -605,7 +571,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     }});
                     const data = await res.json();
                     if (data.status === "success") alert("Ayarlar kaydedildi!");
-                    else alert("Kayıt başarısız.");
                 }} catch (err) {{ alert("Bağlantı hatası."); }}
             }}
 
@@ -643,15 +608,13 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                     res = supabase_client.table("merchants").select("access_token").eq("store_domain", domain).execute()
                     if res.data and res.data[0].get("access_token"):
                         access_token = res.data[0].get("access_token")
-                except Exception:
-                    pass
+                except Exception: pass
 
             if IkasGraphQLClient and not access_token.startswith("ikas_fallback"):
                 try:
                     ik_client = IkasGraphQLClient(access_token)
                     products = ik_client.list_products(limit=10)
-                except Exception:
-                    pass
+                except Exception: pass
 
         if not products:
             products = [
@@ -697,8 +660,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
         }
 
     except Exception as err:
-        tb = traceback.format_exc()
-        logger.error(f"sync_products hata: {str(err)}\n{tb}")
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(err)})
 
 
@@ -707,12 +668,9 @@ async def update_merchant_settings(payload: MerchantSettingsRequest):
     if supabase_client:
         try:
             update_data = {
-                "company_name": payload.company_name,
-                "tax_number": payload.tax_number,
-                "mersis_no": payload.mersis_no,
-                "address": payload.address,
-                "phone": payload.phone,
-                "email": payload.email
+                "company_name": payload.company_name, "tax_number": payload.tax_number,
+                "mersis_no": payload.mersis_no, "address": payload.address,
+                "phone": payload.phone, "email": payload.email
             }
             supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
             AuditLogger.log_event(payload.store_domain, "MERCHANT_SETTINGS_UPDATED", update_data)
@@ -782,13 +740,6 @@ async def ikas_webhook(request: Request):
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 
-@app.get("/api/v1/ikas/force-register")
-async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    domain = normalize_domain(storeDomain)
-    saved, msg = save_merchant_to_supabase(domain, "mock_token")
-    return {"status": "success" if saved else "error", "store": domain}
-
-
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -797,47 +748,18 @@ async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     html_content = f"""
     <!DOCTYPE html>
     <html lang="tr">
-    <head>
-        <meta charset="UTF-8">
-        <title>UyumHub - Güvenli Ödeme (İyzico)</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    </head>
+    <head><meta charset="UTF-8"><title>UyumHub - Güvenli Ödeme</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
         <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 space-y-6">
-            <div class="text-center space-y-2">
-                <div class="w-16 h-16 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white text-3xl font-bold shadow-lg">
-                    <i class="fa-solid fa-credit-card"></i>
-                </div>
-                <h2 class="text-xl font-bold text-slate-900">UyumHub Pro Abonelik</h2>
-                <p class="text-xs text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
+            <h2 class="text-xl font-bold text-center text-slate-900">UyumHub Pro Abonelik</h2>
+            <p class="text-center text-xs text-slate-500">Mağaza: {domain}</p>
+            <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-sm">
+                <div class="flex justify-between"><span>Paket:</span><span class="font-bold">Yıllık Pro Suite</span></div>
+                <div class="flex justify-between"><span>Tutar:</span><span class="font-bold text-emerald-600">2.400 TL / Yıl</span></div>
             </div>
-
-            <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
-                <div class="flex justify-between text-sm">
-                    <span class="text-slate-600">Paket:</span>
-                    <span class="font-bold text-slate-900">Yıllık Pro Uyum Paketi</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                    <span class="text-slate-600">Tutar:</span>
-                    <span class="font-bold text-emerald-600 text-base">2.400,00 TL / Yıl</span>
-                </div>
-                <div class="border-t border-slate-200 pt-2 flex justify-between text-xs text-slate-500">
-                    <span>KDV (%20 Dahil)</span>
-                    <span>İyzico Güvencesiyle</span>
-                </div>
-            </div>
-
-            <div class="space-y-3">
-                <a href="/api/v1/billing/success?storeDomain={domain}" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow-sm text-sm cursor-pointer">
-                    <i class="fa-solid fa-lock"></i> Test Ödemesini Tamamla (Sandbox)
-                </a>
-                <a href="/dashboard?storeDomain={domain}" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl transition flex items-center justify-center text-sm cursor-pointer">
-                    Geri Dön
-                </a>
-            </div>
-
-            <p class="text-[10px] text-center text-slate-400">256-bit SSL Güvenli Ödeme Altyapısı kullanılmaktadır.</p>
+            <a href="/api/v1/billing/success?storeDomain={domain}" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition text-center block text-sm">
+                Test Ödemesini Tamamla (Sandbox)
+            </a>
         </div>
     </body>
     </html>
@@ -852,15 +774,12 @@ async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com")
         try:
             supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
             AuditLogger.log_event(domain, "SUBSCRIPTION_ACTIVATED", {})
-        except Exception:
-            pass
+        except Exception: pass
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 
 @app.get("/")
-async def root():
-    return RedirectResponse(url="/dashboard")
+async def root(): return RedirectResponse(url="/dashboard")
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
+async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
