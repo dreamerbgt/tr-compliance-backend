@@ -20,7 +20,7 @@ IKAS_CLIENT_ID = os.getenv("IKAS_CLIENT_ID", "")
 IKAS_CLIENT_SECRET = os.getenv("IKAS_CLIENT_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://tr-compliance-backend.onrender.com")
 
-# Supabase İstemcisi Güvenli Başlatma
+# Supabase İstemcisi
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
@@ -100,17 +100,18 @@ async def health():
 # İKAS LAUNCH ENDPOINT
 @app.get("/api/v1/ikas/launch")
 async def ikas_launch(request: Request):
-    params = request.query_params
+    params = dict(request.query_params)
     domain = params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
 
-    logger.info(f"Launch isteği alındı. Gelen Parametreler: {dict(params)}")
+    logger.info(f"Launch isteği alındı. Gelen Parametreler: {params}")
 
     if not domain:
         return JSONResponse(
             status_code=200,
             content={
                 "status": "warning",
-                "message": "Mağaza bilgisi bulunamadı. Lütfen uygulamayı İkas Mağaza Paneli içerisinden başlatın."
+                "message": "Mağaza bilgisi bulunamadı. Lütfen uygulamayı İkas Mağaza Paneli içerisinden başlatın.",
+                "debug_received_params": params
             }
         )
 
@@ -120,11 +121,10 @@ async def ikas_launch(request: Request):
             content={
                 "status": "info",
                 "storeDomain": domain,
-                "message": "UyumHub hazır. Client ID bekleniyor."
+                "message": "UyumHub hazır. IKAS_CLIENT_ID bekleniyor."
             }
         )
 
-    # State parametresi üzerinden mağaza domain bilgisi taşınır
     redirect_uri = f"{APP_BASE_URL}/api/v1/ikas/callback"
     authorize_url = (
         f"https://{domain}/admin/oauth/authorize"
@@ -137,25 +137,24 @@ async def ikas_launch(request: Request):
     return RedirectResponse(url=authorize_url)
 
 
-# İKAS CALLBACK ENDPOINT (Standart urllib ile Bağımlılıksız Token Exchange)
+# İKAS CALLBACK ENDPOINT
 @app.get("/api/v1/ikas/callback")
 async def ikas_callback(request: Request):
-    params = request.query_params
-    logger.info(f"Callback çağrıldı. Parametreler: {dict(params)}")
+    params = dict(request.query_params)
+    logger.info(f"Callback çağrıldı. Parametreler: {params}")
     
     code = params.get("code")
-    domain = params.get("state") or params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
+    domain = params.get("state") or params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId") or params.get("id")
 
     if not code:
         return JSONResponse(
             status_code=400,
-            content={"status": "error", "message": "Yetkilendirme kodu (code) bulunamadı."}
+            content={"status": "error", "message": "Yetkilendirme kodu (code) bulunamadı.", "debug_received_params": params}
         )
 
     access_token = None
     token_error = None
 
-    # Python Dahili urllib.request ile Token İsteği
     if IKAS_CLIENT_ID and IKAS_CLIENT_SECRET and domain:
         try:
             token_url = f"https://{domain}/admin/oauth/token"
@@ -182,10 +181,11 @@ async def ikas_callback(request: Request):
                     token_error = f"HTTP status: {response.status}"
                     access_token = f"ikas_token_{code[:12]}"
         except Exception as e:
-            logger.error(f"Token alma hatası (urllib): {str(e)}")
+            logger.error(f"Token alma hatası: {str(e)}")
             token_error = str(e)
             access_token = f"ikas_token_{code[:12]}"
     else:
+        token_error = "Domain or client credentials missing"
         access_token = f"ikas_token_{code[:12]}"
 
     # Supabase Kaydı
@@ -208,7 +208,8 @@ async def ikas_callback(request: Request):
             "status": "success",
             "message": "✅ TR Mevzuat & Uyum Paketi Mağazanıza Başarıyla Bağlandı!",
             "store": domain,
-            "token_status": "authenticated" if access_token and not token_error else "linked_with_code"
+            "token_status": "authenticated" if access_token and not token_error else f"linked_with_fallback ({token_error})",
+            "debug_received_params": params
         }
     )
 
