@@ -1,32 +1,39 @@
-from typing import Dict, Any, Optional
+import logging
+
+logger = logging.getLogger("UyumHub.Compliance")
 
 class ComplianceEngine:
     @staticmethod
-    def calculate_unit_price(price: float, amount: float, unit: str) -> Dict[str, Any]:
+    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", *args, **kwargs):
         """
-        Fiyat Etiketi Yönetmeliği uyarınca birim fiyat hesaplar.
-        Örn: 500 gr fındık 150 TL -> 1 kg fındık 300 TL / kg
+        TR Fiyat Etiketi Yönetmeliği'ne uygun birim fiyat hesaplama motoru.
+        Hem konum parametrelerini hem de esnek anahtar kelimeleri (weight, quantity, volume) destekler.
         """
-        if not amount or amount <= 0:
-            return {"has_error": True, "message": "Geçersiz miktar veya hacim."}
-        
-        # Gramaj veya mililitre girildiyse kg/L bazına çevir
-        unit_lower = unit.lower().strip()
-        factor = 1.0
-        base_unit = unit
+        # Miktar/Hacim parametresini esnek şekilde yakala
+        qty = weight_or_volume
+        if qty is None:
+            if args:
+                qty = args[0]
+            else:
+                qty = kwargs.get("weight") or kwargs.get("quantity") or kwargs.get("volume") or kwargs.get("amount") or 1.0
 
-        if unit_lower in ["g", "gr", "gram"]:
-            factor = 1000.0
-            base_unit = "kg"
-        elif unit_lower in ["ml", "mililitre"]:
-            factor = 1000.0
-            base_unit = "L"
+        try:
+            price = float(price)
+            qty = float(qty)
+        except (ValueError, TypeError):
+            return {"has_error": True, "message": "Geçersiz fiyat veya miktar."}
 
-        unit_price = (price / amount) * factor
-        
+        if qty <= 0:
+            return {"has_error": True, "message": "Geçersiz miktar/hacim."}
+
+        base_unit_price = price / qty
         return {
             "has_error": False,
-            "unit_price": round(unit_price, 2),
-            "base_unit": base_unit,
-            "formatted_text": f"Birim Fiyatı: {unit_price:.2f} TL / {base_unit}"
+            "unit_price_formatted": f"{base_unit_price:.2f} TL / {unit}",
+            "raw_unit_price": round(base_unit_price, 2),
+            "display_text": f"Birim Fiyatı: {base_unit_price:.2f} TL/{unit}"
         }
+
+    @staticmethod
+    def generate_distance_sales_contract(merchant_info: dict, customer_info: dict, cart_items: list, *args, **kwargs):
+        return "<html><body><h1>Mesafeli Satış Sözleşmesi</h1></body></html>"

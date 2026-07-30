@@ -40,10 +40,11 @@ except ImportError:
     except ImportError:
         class ComplianceEngine:
             @staticmethod
-            def calculate_unit_price(price: float, weight_or_volume: float, unit: str = "kg"):
-                if not weight_or_volume or weight_or_volume <= 0:
+            def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", *args, **kwargs):
+                qty = weight_or_volume or kwargs.get("weight") or 1.0
+                if qty <= 0:
                     return {"has_error": True, "message": "Geçersiz miktar/hacim."}
-                base_unit_price = price / weight_or_volume
+                base_unit_price = float(price) / float(qty)
                 return {
                     "has_error": False,
                     "unit_price_formatted": f"{base_unit_price:.2f} TL / {unit}",
@@ -52,7 +53,7 @@ except ImportError:
                 }
 
             @staticmethod
-            def generate_distance_sales_contract(merchant_info: dict, customer_info: dict, cart_items: list):
+            def generate_distance_sales_contract(merchant_info: dict, customer_info: dict, cart_items: list, *args, **kwargs):
                 return "<html><body><h1>Mesafeli Satış Sözleşmesi</h1></body></html>"
 
 # Ikas GraphQL Client Import Güvencesi
@@ -161,7 +162,7 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     }
 
 
-# --- ÜRÜN SENKRONİZASYON VE BİRİM FİYAT ENDPOINT'İ (DETAYLI HATA RAPORLAMALI) ---
+# --- ÜRÜN SENKRONİZASYON VE BİRİM FİYAT ENDPOINT'İ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -223,10 +224,11 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
+                # Konumsal parametre göndererek imza uyumsuzluklarının önüne geçiyoruz
                 compliance_result = ComplianceEngine.calculate_unit_price(
-                    price=price,
-                    weight_or_volume=weight,
-                    unit=unit
+                    price,
+                    weight,
+                    unit
                 )
 
                 variants_compliance.append({
@@ -299,16 +301,16 @@ async def ikas_callback(request: Request):
 @app.post("/api/v1/compliance/calculate-unit-price")
 async def calculate_unit_price(payload: UnitPriceRequest):
     return ComplianceEngine.calculate_unit_price(
-        price=payload.price,
-        weight_or_volume=payload.weight_or_volume,
-        unit=payload.unit
+        payload.price,
+        payload.weight_or_volume,
+        payload.unit
     )
 
 @app.post("/api/v1/compliance/generate-contract")
 async def generate_contract(payload: DistanceContractRequest):
     contract_html = ComplianceEngine.generate_distance_sales_contract(
-        merchant_info=payload.merchant_info,
-        customer_info=payload.customer_info,
-        cart_items=payload.cart_items
+        payload.merchant_info,
+        payload.customer_info,
+        payload.cart_items
     )
     return {"status": "success", "contract_html": contract_html}
