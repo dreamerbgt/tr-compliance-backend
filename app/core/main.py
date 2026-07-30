@@ -7,7 +7,7 @@ import urllib.parse
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel
 
 # Logging Yapılandırması
@@ -125,21 +125,178 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
             return False, str(e_fallback)
 
 
+# --- DASHBOARD UI (HTML RESPONSE) ---
+@app.get("/dashboard", response_class=HTMLResponse)
+async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>UyumHub - TR Mevzuat & Uyum Paketi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen p-6">
+        <div class="max-w-6xl mx-auto space-y-6">
+            
+            <!-- ÜST HEADER -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat Modülü</h1>
+                        <p class="text-sm text-slate-500">Bağlı Mağaza: <span class="font-semibold text-indigo-600" id="store-domain">{domain}</span></p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Sistem Aktif & Uyumlu
+                    </span>
+                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-arrows-rotate" id="sync-icon"></i>
+                        <span>Birim Fiyatları Tara & Güncelle</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- METRİK KARTLARI -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-tag"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Denetlenen Ürün</p>
+                        <h3 class="text-2xl font-bold text-slate-900 mt-0.5" id="total-products-count">3</h3>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-scale-balanced"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fiyat Etiketi Mevzuatı</p>
+                        <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-circle-check"></i> Otomatik Hesaplama Aktif
+                        </h3>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-file-contract"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Mesafeli Satış Sözleşmesi</p>
+                        <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-circle-check"></i> Dinamik Şablon Hazır
+                        </h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ÜRÜN BİRİM FİYAT TABLOSU -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900">Ürün Birim Fiyat Etiket Analizi</h2>
+                        <p class="text-xs text-slate-500 mt-0.5">TR Ticaret Bakanlığı Fiyat Etiketi Yönetmeliği gereğince hesaplanan zorunlu etiketler.</p>
+                    </div>
+                    <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                <th class="p-4 pl-6">Ürün Adı</th>
+                                <th class="p-4">SKU</th>
+                                <th class="p-4">Satış Fiyatı</th>
+                                <th class="p-4">Miktar / Ambalaj</th>
+                                <th class="p-4 pr-6">Hesaplanan Birim Fiyat Etiketi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
+                            <!-- JS ile Dinamik Doldurulacak -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <script>
+            const storeDomain = "{domain}";
+
+            async function loadProducts() {{
+                const btn = document.getElementById("sync-btn");
+                const icon = document.getElementById("sync-icon");
+                const tbody = document.getElementById("products-table-body");
+
+                icon.classList.add("fa-spin");
+                
+                try {{
+                    const res = await fetch(`/api/v1/compliance/sync-products?storeDomain=${{encodeURIComponent(storeDomain)}}`);
+                    const data = await res.json();
+
+                    if (data.status === "success" && data.products) {{
+                        document.getElementById("total-products-count").innerText = data.total_processed;
+                        document.getElementById("last-sync-time").innerText = "Son Güncelleme: " + new Date().toLocaleTimeString();
+                        
+                        tbody.innerHTML = "";
+                        
+                        data.products.forEach(prod => {{
+                            prod.variants.forEach(variant => {{
+                                const row = `
+                                    <tr class="hover:bg-slate-50/80 transition">
+                                        <td class="p-4 pl-6 font-medium text-slate-900">${{prod.product_name}}</td>
+                                        <td class="p-4 text-xs font-mono text-slate-500">${{variant.sku || "-"}}</td>
+                                        <td class="p-4 font-semibold text-slate-800">${{variant.price.toFixed(2)}} TL</td>
+                                        <td class="p-4 text-slate-600">${{variant.weight}} ${{variant.unit}}</td>
+                                        <td class="p-4 pr-6">
+                                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                <i class="fa-solid fa-tag text-indigo-500"></i>
+                                                ${{variant.compliance.display_text}}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                `;
+                                tbody.innerHTML += row;
+                            }});
+                        }});
+                    }}
+                }} catch (err) {{
+                    console.error("Yükleme hatası:", err);
+                }} finally {{
+                    icon.classList.remove("fa-spin");
+                }}
+            }}
+
+            function runSync() {{
+                loadProducts();
+            }}
+
+            // Sayfa açıldığında otomatik verileri çek
+            window.onload = loadProducts;
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
 # --- KÖK VE SAĞLIK KONTROLÜ ENDPOINT'LERİ ---
 @app.get("/")
 async def root():
-    return {
-        "status": "active",
-        "service": "UyumHub Mevzuat Motoru",
-        "version": "1.0.0",
-        "available_endpoints": [
-            "/health",
-            "/api/v1/ikas/force-register",
-            "/api/v1/compliance/sync-products",
-            "/api/v1/ikas/launch",
-            "/docs"
-        ]
-    }
+    return RedirectResponse(url="/dashboard")
 
 @app.get("/health")
 async def health():
@@ -187,7 +344,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             except Exception as e:
                 logger.warning(f"Ikas GraphQL veri çekme hatası (Mock veriye geçiliyor): {str(e)}")
 
-        # Eğer İkas'tan ürün gelmediyse mevzuat motorunu test etmek için Mock Ürün Kataloğu
         if not products:
             products = [
                 {
@@ -224,7 +380,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
-                # Konumsal parametre göndererek imza uyumsuzluklarının önüne geçiyoruz
                 compliance_result = ComplianceEngine.calculate_unit_price(
                     price,
                     weight,
@@ -274,16 +429,8 @@ async def ikas_launch(request: Request):
     raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop")
     domain = normalize_domain(raw_domain)
 
-    redirect_uri = f"{APP_BASE_URL}/api/v1/ikas/callback"
-    authorize_url = (
-        f"https://{domain}/admin/oauth/authorize"
-        f"?client_id={IKAS_CLIENT_ID}"
-        f"&redirect_uri={redirect_uri}"
-        f"&response_type=code"
-        f"&state={domain}"
-        f"&scope=read_products,write_products"
-    )
-    return RedirectResponse(url=authorize_url)
+    # Direkt Dashboard'a yönlendiriyoruz
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 @app.get("/api/v1/ikas/callback")
 async def ikas_callback(request: Request):
@@ -294,7 +441,7 @@ async def ikas_callback(request: Request):
 
     access_token = f"ikas_token_{code[:12]}" if code else "ikas_token_default"
     save_merchant_to_supabase(domain, access_token)
-    return RedirectResponse(url=f"https://{domain}/admin")
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 
 # --- MEVZUAT HESAPLAMA ENDPOINT'LERİ ---
