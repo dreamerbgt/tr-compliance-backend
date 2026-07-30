@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 # Logging Yapılandırması
@@ -182,7 +182,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     return default_profile
 
 
-# --- DASHBOARD UI (YASAL AYARLAR VE SEKMELER EKLENMİŞ) ---
+# --- DASHBOARD UI ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -230,6 +230,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <i class="fa-solid fa-file-contract"></i>
                         <span>Sözleşme Önizle</span>
                     </a>
+                    <a href="/api/v1/compliance/download-contract-pdf?storeDomain={domain}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-file-arrow-down"></i>
+                        <span>Sözleşmeyi PDF İndir</span>
+                    </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i>
                         <span>Vitrine Senkronize Et</span>
@@ -237,7 +241,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 </div>
             </div>
 
-            <!-- SEKMELER (DASHBOARD & AYARLAR) -->
+            <!-- SEKMELER -->
             <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
                 <button onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2">
                     <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi
@@ -249,7 +253,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
             <!-- BÖLÜM 1: ÜRÜN ANALİZİ -->
             <div id="section-products" class="space-y-6">
-                <!-- METRİK KARTLARI -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
                         <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
@@ -286,7 +289,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     </div>
                 </div>
 
-                <!-- TABLO -->
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
@@ -469,7 +471,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_content)
 
 
-# --- API ENDPOINT'LERİ (AYARLAR KAYDETME & SÖZLEŞME GÜNCELLEME) ---
+# --- API ENDPOINT'LERİ ---
 @app.post("/api/v1/merchant/settings")
 async def update_merchant_settings(payload: MerchantSettingsRequest):
     if supabase_client:
@@ -521,6 +523,46 @@ async def preview_contract(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_contract)
 
 
+# --- PDF SÖZLEŞME İNDİRME ENDPOINT'İ ---
+@app.get("/api/v1/compliance/download-contract-pdf")
+async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+
+    merchant_info = {
+        "company_name": profile["company_name"],
+        "address": profile["address"],
+        "phone": profile["phone"],
+        "email": profile["email"],
+        "mersis_no": profile["mersis_no"]
+    }
+    customer_info = {
+        "name": "Ahmet Yılmaz",
+        "address": "Bağdat Cad. No: 123 D: 5 Kadıköy/İstanbul",
+        "phone": "0532 111 22 33",
+        "email": "ahmet.yilmaz@ornek.com"
+    }
+    cart_items = [
+        {"name": "Ege Sızma Zeytinyağı 1000 ml", "quantity": 2, "price": 380.00},
+        {"name": "Organik Çam Balı 850 gr", "quantity": 1, "price": 425.00}
+    ]
+
+    html_contract = ComplianceEngine.generate_distance_sales_contract(
+        merchant_info=merchant_info,
+        customer_info=customer_info,
+        cart_items=cart_items
+    )
+
+    # Tarayıcının direkt PDF olarak indirmesini sağlayan attachment header'ı ekliyoruz
+    return Response(
+        content=html_contract,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f"attachment; filename=Mesafeli_Satis_Sozlesmesi_{domain}.html"
+        }
+    )
+
+
 # --- KÖK VE SAĞLIK KONTROLÜ ENDPOINT'LERİ ---
 @app.get("/")
 async def root():
@@ -547,7 +589,7 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     }
 
 
-# --- İYZİCO ÖDEME & CHECKOUT BAŞLANGIÇ ENDPOINT'İ ---
+# --- İYZİCO ÖDEME & CHECKOUT ---
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
