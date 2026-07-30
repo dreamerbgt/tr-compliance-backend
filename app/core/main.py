@@ -122,13 +122,14 @@ async def ikas_launch(request: Request):
             }
         )
 
-    # İkas OAuth Yetkilendirme Yönlendirmesi
+    # OAuth Yetkilendirme Yönlendirmesi (state={domain} eklenerek mağaza bilgisi korunur)
     redirect_uri = f"{APP_BASE_URL}/api/v1/ikas/callback"
     authorize_url = (
         f"https://{domain}/admin/oauth/authorize"
         f"?client_id={IKAS_CLIENT_ID}"
         f"&redirect_uri={redirect_uri}"
         f"&response_type=code"
+        f"&state={domain}"
         f"&scope=read_products,write_products"
     )
     return RedirectResponse(url=authorize_url)
@@ -141,7 +142,8 @@ async def ikas_callback(request: Request):
     logger.info(f"Callback çağrıldı. Parametreler: {dict(params)}")
     
     code = params.get("code")
-    domain = params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
+    # Domain bilgisini ilk olarak 'state' parametresinden, yoksa alternatiflerden alıyoruz
+    domain = params.get("state") or params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
 
     if not code:
         return JSONResponse(
