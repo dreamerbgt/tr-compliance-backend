@@ -91,6 +91,15 @@ class DistanceContractRequest(BaseModel):
     customer_info: Dict[str, Any]
     cart_items: list
 
+class MerchantSettingsRequest(BaseModel):
+    store_domain: str
+    company_name: str
+    tax_number: str
+    mersis_no: str
+    address: str
+    phone: str
+    email: str
+
 
 def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
     if not raw_domain:
@@ -111,7 +120,13 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
         "access_token": access_token,
         "platform": "ikas",
         "subscription_status": "trial",
-        "trial_ends_at": trial_end
+        "trial_ends_at": trial_end,
+        "company_name": "UyumHub Test Mağazası A.Ş.",
+        "tax_number": "1234567890",
+        "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
+        "phone": "0850 000 00 00",
+        "email": "destek@uyumhub.com"
     }
 
     try:
@@ -132,37 +147,51 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
             return False, str(e_fallback)
 
 
-def get_merchant_subscription(domain: str) -> Dict[str, Any]:
+def get_merchant_profile(domain: str) -> Dict[str, Any]:
+    default_profile = {
+        "company_name": "UyumHub Test Mağazası A.Ş.",
+        "tax_number": "1234567890",
+        "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
+        "phone": "0850 000 00 00",
+        "email": "destek@uyumhub.com",
+        "subscription_status": "trial",
+        "plan": "UyumHub Pro Paket"
+    }
+
     if not supabase_client:
-        return {"status": "active", "plan": "Pro (Mock)", "days_left": 14}
+        return default_profile
     
     try:
         res = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
         if res.data and len(res.data) > 0:
             m = res.data[0]
-            status = m.get("subscription_status", "trial")
             return {
-                "status": status,
-                "plan": "UyumHub Pro Paket",
-                "days_left": 14,
-                "is_active": status in ["trial", "active"]
+                "company_name": m.get("company_name") or default_profile["company_name"],
+                "tax_number": m.get("tax_number") or default_profile["tax_number"],
+                "mersis_no": m.get("mersis_no") or default_profile["mersis_no"],
+                "address": m.get("address") or default_profile["address"],
+                "phone": m.get("phone") or default_profile["phone"],
+                "email": m.get("email") or default_profile["email"],
+                "subscription_status": m.get("subscription_status", "trial"),
+                "plan": "UyumHub Pro Paket"
             }
     except Exception as e:
-        logger.error(f"Abonelik okuma hatası: {str(e)}")
+        logger.error(f"Profil okuma hatası: {str(e)}")
     
-    return {"status": "trial", "plan": "UyumHub Pro Paket", "days_left": 14, "is_active": True}
+    return default_profile
 
 
-# --- DASHBOARD UI (FATURALANDIRMA VE ABONELİK ENTEGRELİ) ---
+# --- DASHBOARD UI (YASAL AYARLAR VE SEKMELER EKLENMİŞ) ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
-    sub_info = get_merchant_subscription(domain)
+    profile = get_merchant_profile(domain)
     
     status_badge = ""
-    if sub_info["status"] == "trial":
+    if profile["subscription_status"] == "trial":
         status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">14 Günlük Ücretsiz Deneme (Aktif)</span>'
-    elif sub_info["status"] == "active":
+    elif profile["subscription_status"] == "active":
         status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">PRO Abonelik (Aktif)</span>'
     else:
         status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">Deneme Süresi Doldu!</span>'
@@ -195,83 +224,136 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     {status_badge}
                     <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-credit-card"></i>
-                        <span>PRO Plana Geç (İyzico)</span>
+                        <span>PRO Plana Geç</span>
                     </button>
-                    <a href="/api/v1/compliance/preview-contract" target="_blank" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                    <a href="/api/v1/compliance/preview-contract?storeDomain={domain}" target="_blank" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-file-contract"></i>
                         <span>Sözleşme Önizle</span>
                     </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i>
-                        <span>İkas Vitrinine Senkronize Et</span>
+                        <span>Vitrine Senkronize Et</span>
                     </button>
                 </div>
             </div>
 
-            <!-- METRİK KARTLARI -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-tag"></i>
+            <!-- SEKMELER (DASHBOARD & AYARLAR) -->
+            <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
+                <button onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2">
+                    <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi
+                </button>
+                <button onclick="switchTab('settings')" id="tab-settings-btn" class="pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-building-shield"></i> Yasal Şirket Bilgileri (Ayarlar)
+                </button>
+            </div>
+
+            <!-- BÖLÜM 1: ÜRÜN ANALİZİ -->
+            <div id="section-products" class="space-y-6">
+                <!-- METRİK KARTLARI -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+                            <i class="fa-solid fa-tag"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Denetlenen Ürün</p>
+                            <h3 class="text-2xl font-bold text-slate-900 mt-0.5" id="total-products-count">3</h3>
+                        </div>
                     </div>
-                    <div>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Denetlenen Ürün</p>
-                        <h3 class="text-2xl font-bold text-slate-900 mt-0.5" id="total-products-count">3</h3>
+
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
+                            <i class="fa-solid fa-scale-balanced"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fiyat Etiketi Mevzuatı</p>
+                            <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                                <i class="fa-solid fa-circle-check"></i> Otomatik Senkronizasyon
+                            </h3>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+                            <i class="fa-solid fa-file-contract"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Abonelik Durumu</p>
+                            <h3 class="text-sm font-bold text-indigo-600 mt-1 flex items-center gap-1">
+                                <i class="fa-solid fa-bolt"></i> {profile["plan"]}
+                            </h3>
+                        </div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-scale-balanced"></i>
+                <!-- TABLO -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-900">Ürün Birim Fiyat Etiket Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">TR Ticaret Bakanlığı Fiyat Etiketi Yönetmeliği gereğince hesaplanan ve İkas'a yazılan etiketler.</p>
+                        </div>
+                        <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
-                    <div>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fiyat Etiketi Mevzuatı</p>
-                        <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-circle-check"></i> Otomatik Senkronizasyon
-                        </h3>
-                    </div>
-                </div>
 
-                <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
-                        <i class="fa-solid fa-file-contract"></i>
-                    </div>
-                    <div>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Abonelik Durumu</p>
-                        <h3 class="text-sm font-bold text-indigo-600 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-bolt"></i> {sub_info["plan"]}
-                        </h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                    <th class="p-4 pl-6">Ürün Adı</th>
+                                    <th class="p-4">SKU</th>
+                                    <th class="p-4">Satış Fiyatı</th>
+                                    <th class="p-4">Miktar / Ambalaj</th>
+                                    <th class="p-4">Hesaplanan Etiket</th>
+                                    <th class="p-4 pr-6">İkas Vitrin Durumu</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
+                                <!-- JS ile Doldurulacak -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
-            <!-- ÜRÜN BİRİM FİYAT TABLOSU -->
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <div class="p-6 border-b border-slate-100 flex justify-between items-center">
-                    <div>
-                        <h2 class="text-base font-bold text-slate-900">Ürün Birim Fiyat Etiket Analizi</h2>
-                        <p class="text-xs text-slate-500 mt-0.5">TR Ticaret Bakanlığı Fiyat Etiketi Yönetmeliği gereğince hesaplanan ve İkas'a yazılan etiketler.</p>
-                    </div>
-                    <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
+            <!-- BÖLÜM 2: YASAL ŞİRKET BİLGİLERİ (AYARLAR) -->
+            <div id="section-settings" class="hidden bg-white rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-900">Resmi Şirket ve Fatura Bilgileri</h2>
+                    <p class="text-xs text-slate-500 mt-1">Bu bilgiler sözleşmelerde, ön bilgilendirme formlarında ve yasal belgelerde satıcı bilgisi olarak otomatik kullanılır.</p>
                 </div>
 
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                <th class="p-4 pl-6">Ürün Adı</th>
-                                <th class="p-4">SKU</th>
-                                <th class="p-4">Satış Fiyatı</th>
-                                <th class="p-4">Miktar / Ambalaj</th>
-                                <th class="p-4">Hesaplanan Etiket</th>
-                                <th class="p-4 pr-6">İkas Vitrin Durumu</th>
-                            </tr>
-                        </thead>
-                        <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
-                            <!-- JS ile Dinamik Doldurulacak -->
-                        </tbody>
-                    </table>
-                </div>
+                <form id="settings-form" onsubmit="saveSettings(event)" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Şirket Unvanı</label>
+                        <input type="text" id="company_name" value="{profile['company_name']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Vergi Numarası</label>
+                        <input type="text" id="tax_number" value="{profile['tax_number']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">MERSİS Numarası</label>
+                        <input type="text" id="mersis_no" value="{profile['mersis_no']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Destek E-Posta</label>
+                        <input type="email" id="email" value="{profile['email']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Resmi Şirket Adresi</label>
+                        <input type="text" id="address" value="{profile['address']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 uppercase mb-2">Telefon Numarası</label>
+                        <input type="text" id="phone" value="{profile['phone']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-600">
+                    </div>
+                    <div class="md:col-span-2 flex justify-end pt-4">
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-xl transition shadow-sm text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-floppy-disk"></i> Ayarları Kaydet
+                        </button>
+                    </div>
+                </form>
             </div>
 
         </div>
@@ -279,12 +361,31 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
         <script>
             const storeDomain = "{domain}";
 
+            function switchTab(tab) {{
+                const prodBtn = document.getElementById("tab-products-btn");
+                const settBtn = document.getElementById("tab-settings-btn");
+                const prodSec = document.getElementById("section-products");
+                const settSec = document.getElementById("section-settings");
+
+                if (tab === 'products') {{
+                    prodBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold";
+                    settBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2";
+                    prodSec.classList.remove("hidden");
+                    settSec.classList.add("hidden");
+                }} else {{
+                    settBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold";
+                    prodBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2";
+                    settSec.classList.remove("hidden");
+                    prodSec.classList.add("hidden");
+                }}
+            }}
+
             async function loadProducts() {{
                 const icon = document.getElementById("sync-icon");
                 const tbody = document.getElementById("products-table-body");
+                if (!icon || !tbody) return;
 
                 icon.classList.add("fa-spin");
-                
                 try {{
                     const res = await fetch(`/api/v1/compliance/sync-products?storeDomain=${{encodeURIComponent(storeDomain)}}`);
                     const data = await res.json();
@@ -294,7 +395,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         document.getElementById("last-sync-time").innerText = "Son Senkronizasyon: " + new Date().toLocaleTimeString();
                         
                         tbody.innerHTML = "";
-                        
                         data.products.forEach(prod => {{
                             prod.variants.forEach(variant => {{
                                 const isSynced = variant.synced_to_ikas;
@@ -328,13 +428,38 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 }}
             }}
 
-            function runSync() {{
-                loadProducts();
+            async function saveSettings(event) {{
+                event.preventDefault();
+                const payload = {{
+                    store_domain: storeDomain,
+                    company_name: document.getElementById("company_name").value,
+                    tax_number: document.getElementById("tax_number").value,
+                    mersis_no: document.getElementById("mersis_no").value,
+                    address: document.getElementById("address").value,
+                    phone: document.getElementById("phone").value,
+                    email: document.getElementById("email").value
+                }};
+
+                try {{
+                    const res = await fetch("/api/v1/merchant/settings", {{
+                        method: "POST",
+                        headers: {{ "Content-Type": "application/json" }},
+                        body: JSON.stringify(payload)
+                    }});
+                    const data = await res.json();
+                    if (data.status === "success") {{
+                        alert("Şirket yasal ayarları başarıyla kaydedildi!");
+                    }} else {{
+                        alert("Kayıt sırasında hata oluştu.");
+                    }}
+                }} catch (err) {{
+                    console.error("Hata:", err);
+                    alert("Bağlantı hatası.");
+                }}
             }}
 
-            function startCheckout() {{
-                window.location.href = `/api/v1/billing/checkout?storeDomain=${{encodeURIComponent(storeDomain)}}`;
-            }}
+            function runSync() {{ loadProducts(); }}
+            function startCheckout() {{ window.location.href = `/api/v1/billing/checkout?storeDomain=${{encodeURIComponent(storeDomain)}}`; }}
 
             window.onload = loadProducts;
         </script>
@@ -344,12 +469,63 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_content)
 
 
+# --- API ENDPOINT'LERİ (AYARLAR KAYDETME & SÖZLEŞME GÜNCELLEME) ---
+@app.post("/api/v1/merchant/settings")
+async def update_merchant_settings(payload: MerchantSettingsRequest):
+    if supabase_client:
+        try:
+            update_data = {
+                "company_name": payload.company_name,
+                "tax_number": payload.tax_number,
+                "mersis_no": payload.mersis_no,
+                "address": payload.address,
+                "phone": payload.phone,
+                "email": payload.email
+            }
+            supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
+            return {"status": "success", "message": "Ayarlar kaydedildi."}
+        except Exception as e:
+            logger.error(f"Ayarlar güncelleme hatası: {str(e)}")
+            return {"status": "error", "detail": str(e)}
+    return {"status": "success", "message": "Mock mod: Ayarlar kaydedildi."}
+
+
+@app.get("/api/v1/compliance/preview-contract", response_class=HTMLResponse)
+async def preview_contract(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+
+    merchant_info = {
+        "company_name": profile["company_name"],
+        "address": profile["address"],
+        "phone": profile["phone"],
+        "email": profile["email"],
+        "mersis_no": profile["mersis_no"]
+    }
+    customer_info = {
+        "name": "Ahmet Yılmaz",
+        "address": "Bağdat Cad. No: 123 D: 5 Kadıköy/İstanbul",
+        "phone": "0532 111 22 33",
+        "email": "ahmet.yilmaz@ornek.com"
+    }
+    cart_items = [
+        {"name": "Ege Sızma Zeytinyağı 1000 ml", "quantity": 2, "price": 380.00},
+        {"name": "Organik Çam Balı 850 gr", "quantity": 1, "price": 425.00}
+    ]
+
+    html_contract = ComplianceEngine.generate_distance_sales_contract(
+        merchant_info=merchant_info,
+        customer_info=customer_info,
+        cart_items=cart_items
+    )
+    return HTMLResponse(content=html_contract)
+
+
 # --- KÖK VE SAĞLIK KONTROLÜ ENDPOINT'LERİ ---
 @app.get("/")
 async def root():
     return RedirectResponse(url="/dashboard")
 
-@app.get("https://tr-compliance-backend.onrender.com/health")
 @app.get("/health")
 async def health():
     return {
@@ -376,7 +552,6 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     
-    # Gerçek İyzico CheckoutFormInitialize entegrasyonu için HTML/JS simülasyonu
     html_content = f"""
     <!DOCTYPE html>
     <html lang="tr">
@@ -551,35 +726,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 "traceback": tb.splitlines()[-3:] if tb else []
             }
         )
-
-
-# --- SÖZLEŞME ÖNİZLEME (TEST) ENDPOINT'İ ---
-@app.get("/api/v1/compliance/preview-contract", response_class=HTMLResponse)
-async def preview_contract():
-    merchant_info = {
-        "company_name": "UyumHub E-Ticaret Çözümleri Ltd. Şti.",
-        "address": "Kayseri Teknopark 2. Bina No: 42",
-        "phone": "0350 222 33 44",
-        "email": "hukuk@uyumhub.com",
-        "mersis_no": "0456789123400019"
-    }
-    customer_info = {
-        "name": "Ahmet Yılmaz",
-        "address": "Bağdat Cad. No: 123 D: 5 Kadıköy/İstanbul",
-        "phone": "0532 111 22 33",
-        "email": "ahmet.yilmaz@ornek.com"
-    }
-    cart_items = [
-        {"name": "Ege Sızma Zeytinyağı 1000 ml", "quantity": 2, "price": 380.00},
-        {"name": "Organik Çam Balı 850 gr", "quantity": 1, "price": 425.00}
-    ]
-
-    html_contract = ComplianceEngine.generate_distance_sales_contract(
-        merchant_info=merchant_info,
-        customer_info=customer_info,
-        cart_items=cart_items
-    )
-    return HTMLResponse(content=html_contract)
 
 
 # --- İKAS LAUNCH & CALLBACK ENDPOINT'LERİ ---
