@@ -97,13 +97,33 @@ async def health():
     }
 
 
+def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
+    """
+    Gelen mağaza adını (ör. dev-mevzuattestmagaza) tam domain formatına (dev-mevzuattestmagaza.myikas.com) çevirir.
+    """
+    if not raw_domain:
+        return None
+    raw_domain = raw_domain.strip().lower()
+    if "." not in raw_domain:
+        return f"{raw_domain}.myikas.com"
+    return raw_domain
+
+
 # İKAS LAUNCH ENDPOINT
 @app.get("/api/v1/ikas/launch")
 async def ikas_launch(request: Request):
     params = dict(request.query_params)
-    domain = params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
-
-    logger.info(f"Launch isteği alındı. Gelen Parametreler: {params}")
+    raw_domain = (
+        params.get("storeName") or 
+        params.get("storeDomain") or 
+        params.get("store_domain") or 
+        params.get("shop") or 
+        params.get("domain") or 
+        params.get("merchantId")
+    )
+    
+    domain = normalize_domain(raw_domain)
+    logger.info(f"Launch isteği alındı. Ham: {raw_domain}, Normalize: {domain}")
 
     if not domain:
         return JSONResponse(
@@ -144,7 +164,17 @@ async def ikas_callback(request: Request):
     logger.info(f"Callback çağrıldı. Parametreler: {params}")
     
     code = params.get("code")
-    domain = params.get("state") or params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId") or params.get("id")
+    raw_domain = (
+        params.get("storeName") or 
+        params.get("state") or 
+        params.get("storeDomain") or 
+        params.get("store_domain") or 
+        params.get("shop") or 
+        params.get("domain") or 
+        params.get("merchantId")
+    )
+    
+    domain = normalize_domain(raw_domain)
 
     if not code:
         return JSONResponse(
@@ -185,7 +215,7 @@ async def ikas_callback(request: Request):
             token_error = str(e)
             access_token = f"ikas_token_{code[:12]}"
     else:
-        token_error = "Domain or client credentials missing"
+        token_error = f"Missing requirements - ID:{bool(IKAS_CLIENT_ID)}, Secret:{bool(IKAS_CLIENT_SECRET)}, Domain:{domain}"
         access_token = f"ikas_token_{code[:12]}"
 
     # Supabase Kaydı
@@ -208,8 +238,7 @@ async def ikas_callback(request: Request):
             "status": "success",
             "message": "✅ TR Mevzuat & Uyum Paketi Mağazanıza Başarıyla Bağlandı!",
             "store": domain,
-            "token_status": "authenticated" if access_token and not token_error else f"linked_with_fallback ({token_error})",
-            "debug_received_params": params
+            "token_status": "authenticated" if access_token and not token_error else f"linked ({token_error})"
         }
     )
 
