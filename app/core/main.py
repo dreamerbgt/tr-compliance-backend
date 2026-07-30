@@ -151,7 +151,7 @@ class KVKKEngine:
         """
 
 
-# --- UYUMLULUK VE SERTİFİKA MOTORU ---
+# --- UYUMLULUK MOTORU ---
 class ComplianceEngine:
     @staticmethod
     def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", *args, **kwargs):
@@ -215,30 +215,6 @@ class ComplianceEngine:
         </html>
         """
 
-    @staticmethod
-    def generate_distance_sales_contract(merchant_info: Dict[str, Any], customer_info: Dict[str, Any], cart_items: List[Dict[str, Any]]) -> str:
-        m_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
-        m_mersis = merchant_info.get("mersis_no", "0123456789000015")
-        c_name = customer_info.get("name", "Müşteri Adı Soyadı")
-        c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
-
-        subtotal = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in cart_items)
-        shipping_fee = 49.90 if 0 < subtotal < 1000 else 0.0
-        grand_total = subtotal + shipping_fee
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="tr">
-        <head><meta charset="UTF-8"><title>Mesafeli Satış Sözleşmesi</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>MESAFELİ SATIŞ SÖZLEŞMESİ</h2>
-            <p><strong>Satıcı:</strong> {m_name} (MERSİS: {m_mersis})</p>
-            <p><strong>Alıcı:</strong> {c_name} ({c_address})</p>
-            <p><strong>Toplam Tutar:</strong> {grand_total:.2f} TL</p>
-        </body>
-        </html>
-        """
-
 
 # --- TRENDYOL AUDIT ENGINE ---
 class TrendyolAuditEngine:
@@ -262,9 +238,10 @@ class TrendyolAuditEngine:
 app = FastAPI(
     title="UyumHub - Mevzuat Platformu",
     description="B2B E-Ticaret Compliance Servisi",
-    version="2.1.0"
+    version="2.2.0"
 )
 
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -272,6 +249,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- IFRAME VE GÜVENLİK MIDDLEWARE (İKAS PANELİNDE DÖNÜP DURMASINI ENGELLEYEN KISIM) ---
+@app.middleware("http")
+async def add_iframe_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # İkas iframe içinde açılmasına izin ver
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'self' https://*.myikas.com https://*.ikas.com https://admin.ikas.com http://localhost:*;"
+    if "X-Frame-Options" in response.headers:
+        del response.headers["X-Frame-Options"]
+    return response
+
 
 class MerchantSettingsRequest(BaseModel):
     store_domain: str
@@ -331,58 +320,30 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     return default_profile
 
 
-# --- ROUTE 1: LOGIN EKRANI ---
-@app.get("/login", response_class=HTMLResponse)
-async def render_login_page():
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="tr">
-    <head>
-        <meta charset="UTF-8">
-        <title>UyumHub - Giriş</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    </head>
-    <body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-8 space-y-6">
-            <div class="text-center space-y-2">
-                <div class="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold mx-auto shadow-lg shadow-indigo-950">
-                    <i class="fa-solid fa-shield-halved"></i>
-                </div>
-                <h1 class="text-2xl font-bold text-white">UyumHub Mağaza Paneli</h1>
-                <p class="text-xs text-slate-400">Yönetmek istediğiniz mağaza domain adını girin.</p>
-            </div>
-
-            <form action="/dashboard" method="GET" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-2">Mağaza Domain</label>
-                    <input type="text" name="storeDomain" required placeholder="ornek.myikas.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500">
-                </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm">
-                    <i class="fa-solid fa-right-to-bracket"></i> Panele Giriş Yap
-                </button>
-            </form>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
-
-
-# --- ROUTE 2: DASHBOARD UI ---
-@app.get("/dashboard", response_class=HTMLResponse)
-async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+# --- ROUTE 1: DASHBOARD VE İKAS LAUNCH HTML RENDER ---
+async def build_dashboard_html(storeDomain: str, is_dev_request: bool = False) -> str:
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
     platform_name = profile["platform"]
     
+    # Geliştirici Mağazası Algılama (dev- içeriyorsa veya dev=true ise)
+    is_developer = is_dev_request or ("dev-" in domain) or ("test" in domain)
+    
+    agency_button_html = ""
+    if is_developer:
+        agency_button_html = """
+        <a href="/agency/dashboard" target="_blank" class="bg-slate-900 hover:bg-slate-800 text-emerald-400 text-xs font-bold px-3 py-2 rounded-xl transition border border-emerald-500/30 flex items-center gap-1">
+            <i class="fa-solid fa-code"></i> Dev: Ajans Paneli
+        </a>
+        """
+
     status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">Platform: {platform_name}</span>'
     if profile["subscription_status"] == "active":
         status_badge += ' <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">PRO (Aktif)</span>'
     else:
         status_badge += ' <span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">Deneme Süresi</span>'
 
-    html_content = f"""
+    return f"""
     <!DOCTYPE html>
     <html lang="tr">
     <head>
@@ -412,6 +373,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
                 <div class="flex items-center gap-2 flex-wrap">
                     {status_badge}
+                    {agency_button_html}
                     <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition cursor-pointer">
                         <i class="fa-solid fa-credit-card"></i> PRO Plana Geç
                     </button>
@@ -420,7 +382,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <a href="/audit/trendyol" class="bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Audit</a>
                     <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Sertifika</a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition cursor-pointer">Senkronize Et</button>
-                    <a href="/login" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Çıkış</a>
                 </div>
             </div>
 
@@ -516,25 +477,75 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     </body>
     </html>
     """
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    is_dev = request.query_params.get("dev") == "true"
+    html_content = await build_dashboard_html(storeDomain, is_dev_request=is_dev)
     return HTMLResponse(content=html_content)
 
 
-# --- ROUTE 3: AJANS PARTNER DASHBOARD (GİZLİ) ---
+# --- ROUTE 2: İKAS LAUNCH & CALLBACK (IFRAME UYUMLU DOĞRUDAN RENDER) ---
+@app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
+async def ikas_launch(request: Request):
+    params = dict(request.query_params)
+    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+    domain = normalize_domain(raw_domain)
+    
+    # HTTP Yönlendirmesi yapmak yerine doğrudan dashboard HTML'i döndürülür
+    html_content = await build_dashboard_html(domain, is_dev_request=True)
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/api/v1/ikas/callback", response_class=HTMLResponse)
+async def ikas_callback(request: Request):
+    params = dict(request.query_params)
+    code = params.get("code")
+    raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+    domain = normalize_domain(raw_domain)
+
+    access_token = f"ikas_token_{code[:12]}" if code else "ikas_token_default"
+    save_merchant_to_supabase(domain, access_token, platform="ikas")
+    
+    html_content = await build_dashboard_html(domain, is_dev_request=True)
+    return HTMLResponse(content=html_content)
+
+
+# --- ROUTE 3: LOGIN VE DİĞER SAYFALAR ---
+@app.get("/login", response_class=HTMLResponse)
+async def render_login_page():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8"><title>UyumHub - Giriş</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-slate-800 rounded-2xl p-8 space-y-6 border border-slate-700">
+            <h1 class="text-2xl font-bold text-center">UyumHub Mağaza Paneli</h1>
+            <form action="/dashboard" method="GET" class="space-y-4">
+                <input type="text" name="storeDomain" required placeholder="ornek.myikas.com" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white">
+                <button type="submit" class="w-full bg-indigo-600 font-bold py-3 rounded-xl">Panele Giriş Yap</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
 @app.get("/agency/dashboard", response_class=HTMLResponse)
 async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
     html_content = f"""
     <!DOCTYPE html>
     <html lang="tr">
-    <head>
-        <meta charset="UTF-8">
-        <title>UyumHub - Ajans Paneli</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+    <head><meta charset="UTF-8"><title>UyumHub - Ajans Paneli</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-slate-900 text-slate-100 font-sans p-6">
         <div class="max-w-6xl mx-auto space-y-6">
             <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 flex justify-between items-center">
                 <h1 class="text-xl font-bold text-white">Ajans Partner Programı Panel</h1>
-                <a href="/login" class="bg-slate-700 text-white text-xs px-4 py-2 rounded-xl">Mağaza Girişine Dön</a>
+                <a href="/login" class="bg-slate-700 text-white text-xs px-4 py-2 rounded-xl">Giriş Ekranına Dön</a>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700"><p class="text-xs text-slate-400">Bağlı Mağaza</p><h3 class="text-3xl font-bold text-white mt-2">18 Mağaza</h3></div>
@@ -548,44 +559,7 @@ async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
     return HTMLResponse(content=html_content)
 
 
-# --- ROUTE 4: TRENDYOL AUDIT ---
-@app.get("/audit/trendyol", response_class=HTMLResponse)
-async def render_trendyol_audit_page(supplierId: str = "123456"):
-    audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
-    return HTMLResponse(content=f"<div style='font-family:sans-serif; padding:40px;'><h1>Trendyol Audit Supplier: {supplierId}</h1><p>Olası Risk: {audit_data['estimated_penalty_risk']}</p><a href='/login'>Giriş Ekranına Dön</a></div>")
-
-
-# --- ROUTE 5: SHOPIFY OS 2.0 STOREFRONT BADGE ---
-@app.get("/api/v1/shopify/storefront/compliance-badge")
-async def get_shopify_storefront_badge(price: float, weight: float = 1.0, unit: str = "kg", storeDomain: str = "organikgurme.myshopify.com"):
-    domain = normalize_domain(storeDomain)
-    calc_res = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
-    
-    badge_html = f"""
-    <div class="uyumhub-unit-price-badge" style="display: inline-flex; align-items: center; gap: 6px; background-color: #f1f5f9; border: 1px solid #cbd5e1; color: #0f172a; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; margin: 8px 0;">
-        <span>{calc_res.get('display_text', 'Birim Fiyat Hesaplandı')}</span>
-    </div>
-    """
-    return JSONResponse(content={
-        "status": "success", "store": domain, "formatted_text": calc_res.get("display_text"), "badge_html": badge_html
-    })
-
-
-# --- ROUTE 6: KVKK & ÇEREZ API'LERİ ---
-@app.get("/api/v1/compliance/kvkk", response_class=HTMLResponse)
-async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    domain = normalize_domain(storeDomain)
-    profile = get_merchant_profile(domain)
-    return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
-
-@app.get("/api/v1/compliance/cookie-policy", response_class=HTMLResponse)
-async def get_cookie_policy(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    domain = normalize_domain(storeDomain)
-    profile = get_merchant_profile(domain)
-    return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
-
-
-# --- ROUTE 7: ÜRÜN SENKRONİZASYON API'Sİ ---
+# --- ROUTE 4: API ENDPOINTLERİ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -623,85 +597,41 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(err)})
 
 
-# --- ROUTE 8: ABONELİK CHECKOUT VE BİLİLİNG API'LERİ ---
-@app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
-async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+@app.get("/api/v1/compliance/kvkk", response_class=HTMLResponse)
+async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
-    AuditLogger.log_event(domain, "CHECKOUT_STARTED", {})
-    
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="tr">
-    <head><meta charset="UTF-8"><title>UyumHub - Güvenli Ödeme</title><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
-        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 space-y-6">
-            <h2 class="text-xl font-bold text-center text-slate-900">UyumHub Pro Abonelik</h2>
-            <p class="text-center text-xs text-slate-500">Mağaza: {domain}</p>
-            <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-sm">
-                <div class="flex justify-between"><span>Paket:</span><span class="font-bold">Yıllık Pro Suite</span></div>
-                <div class="flex justify-between"><span>Tutar:</span><span class="font-bold text-emerald-600">2.400 TL / Yıl</span></div>
-            </div>
-            <a href="/api/v1/billing/success?storeDomain={domain}" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition text-center block text-sm">
-                Test Ödemesini Tamamla (Sandbox)
-            </a>
-            <a href="/dashboard?storeDomain={domain}" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 rounded-xl transition text-center block text-xs">Geri Dön</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    profile = get_merchant_profile(domain)
+    return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
 
-
-@app.get("/api/v1/billing/success")
-async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+@app.get("/api/v1/compliance/cookie-policy", response_class=HTMLResponse)
+async def get_cookie_policy(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
-    if supabase_client:
-        try:
-            supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
-            AuditLogger.log_event(domain, "SUBSCRIPTION_ACTIVATED", {})
-        except Exception: pass
-    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+    profile = get_merchant_profile(domain)
+    return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
 
-
-# --- ROUTE 9: SERTİFİKA VE AYARLAR API'LERİ ---
 @app.get("/api/v1/compliance/certificate", response_class=HTMLResponse)
 async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
     return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
 
+@app.get("/audit/trendyol", response_class=HTMLResponse)
+async def render_trendyol_audit_page(supplierId: str = "123456"):
+    audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
+    return HTMLResponse(content=f"<div style='font-family:sans-serif; padding:40px;'><h1>Trendyol Audit Supplier: {supplierId}</h1><p>Risk: {audit_data['estimated_penalty_risk']}</p></div>")
 
-@app.post("/api/v1/merchant/settings")
-async def update_merchant_settings(payload: MerchantSettingsRequest):
-    if supabase_client:
-        try:
-            update_data = {"company_name": payload.company_name, "tax_number": payload.tax_number, "mersis_no": payload.mersis_no, "address": payload.address, "phone": payload.phone, "email": payload.email}
-            supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
-            return {"status": "success"}
-        except Exception as e: return {"status": "error", "detail": str(e)}
-    return {"status": "success"}
+@app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
+async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    return HTMLResponse(content=f"<h1>UyumHub Checkout for {domain}</h1><a href='/api/v1/billing/success?storeDomain={domain}'>Ödemeyi Tamamla</a>")
 
-
-# --- ROUTE 10: İKAS ENTEGRASYON CALLBACK & LAUNCH ---
-@app.get("/api/v1/ikas/callback")
-async def ikas_callback(request: Request):
-    params = dict(request.query_params)
-    domain = normalize_domain(params.get("state") or params.get("storeName") or params.get("shop"))
-    save_merchant_to_supabase(domain, "token_ikas_123", platform="ikas")
+@app.get("/api/v1/billing/success")
+async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
-@app.get("/api/v1/ikas/launch")
-async def ikas_launch(request: Request):
-    params = dict(request.query_params)
-    domain = normalize_domain(params.get("storeName") or params.get("shop"))
-    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
-
-
-# --- KÖK DİZİN VE SAĞLIK KONTROLÜ ---
 @app.get("/")
-async def root(): 
-    return RedirectResponse(url="/login")
+async def root(): return RedirectResponse(url="/login")
 
 @app.get("/health")
-async def health(): 
-    return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
+async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
