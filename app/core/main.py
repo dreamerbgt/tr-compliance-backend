@@ -67,36 +67,29 @@ except ImportError:
         IkasGraphQLClient = None
 
 
-# --- ÇOKLU PLATFORM İSTEMCİLERİ (SHOPIFY & TRENDYOL) ---
+# --- ÇOKLU PLATFORM İSTEMCİLERİ ---
 class ShopifyAPIClient:
     def __init__(self, store_domain: str, access_token: str):
         self.store_domain = store_domain
         self.access_token = access_token
-        self.base_url = f"https://{store_domain}/admin/api/2024-01"
 
     def list_products(self) -> List[Dict[str, Any]]:
-        # Shopify REST/GraphQL ürün çekme simülasyonu / gerçek entegrasyon sarmalayıcısı
         logger.info(f"Shopify mağazasından ürünler çekiliyor: {self.store_domain}")
         return [
             {
                 "id": "shp_001",
                 "name": "Shopify Organik Zeytinyağı 750 ml",
-                "variants": [
-                    {"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}
-                ]
+                "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]
             }
         ]
 
     def update_product_tag(self, product_id: str, tag_text: str) -> bool:
-        logger.info(f"Shopify Ürün {product_id} metafield güncellendi: {tag_text}")
         return True
 
 
 class TrendyolAPIClient:
     def __init__(self, supplier_id: str, api_key: str, api_secret: str):
         self.supplier_id = supplier_id
-        self.api_key = api_key
-        self.api_secret = api_secret
 
     def list_products(self) -> List[Dict[str, Any]]:
         logger.info(f"Trendyol Satıcı Paneli ({self.supplier_id}) ürünleri taranıyor...")
@@ -104,20 +97,14 @@ class TrendyolAPIClient:
             {
                 "id": "ty_001",
                 "name": "Trendyol Süzme Çiçek Balı 1000 gr",
-                "variants": [
-                    {"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}
-                ]
+                "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]
             }
         ]
-
-    def update_product_description(self, product_id: str, compliance_text: str) -> bool:
-        logger.info(f"Trendyol Ürün {product_id} açıklama etiketleri güncellendi: {compliance_text}")
-        return True
 
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - TR Mevzuat & Uyum Paketi API",
+    title="UyumHub - TR Mevzuat & Çoklu Platform",
     description="İkas, Shopify ve Trendyol için B2B E-Ticaret Mevzuat Uyum Servisi",
     version="1.0.0"
 )
@@ -185,10 +172,7 @@ def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "i
         try:
             existing = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
             if existing.data:
-                supabase_client.table("merchants").update({
-                    "access_token": access_token,
-                    "platform": platform
-                }).eq("store_domain", domain).execute()
+                supabase_client.table("merchants").update({"access_token": access_token, "platform": platform}).eq("store_domain", domain).execute()
             else:
                 supabase_client.table("merchants").insert(merchant_data).execute()
             return True, "Fallback kayıt başarılı"
@@ -258,7 +242,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen p-6">
         <div class="max-w-6xl mx-auto space-y-6">
             
-            <!-- ÜST HEADER -->
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
@@ -277,13 +260,15 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <a href="/api/v1/compliance/preview-contract?storeDomain={domain}" target="_blank" class="bg-emerald-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-file-contract"></i> Sözleşme Önizle
                     </a>
+                    <a href="/api/v1/compliance/download-contract-pdf?storeDomain={domain}" class="bg-blue-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-file-arrow-down"></i> PDF İndir
+                    </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Vitrini Senkronize Et
                     </button>
                 </div>
             </div>
 
-            <!-- SEKMELER -->
             <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
                 <button onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2">
                     <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi ({profile["platform"].upper()})
@@ -293,7 +278,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 </button>
             </div>
 
-            <!-- BÖLÜM 1: ÜRÜN ANALİZİ -->
             <div id="section-products" class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
@@ -349,14 +333,12 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                 </tr>
                             </thead>
                             <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
-                                <!-- JS ile Doldurulacak -->
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
 
-            <!-- BÖLÜM 2: AYARLAR -->
             <div id="section-settings" class="hidden bg-white rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
                 <div>
                     <h2 class="text-lg font-bold text-slate-900">Resmi Şirket ve Fatura Bilgileri</h2>
@@ -448,7 +430,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                         </td>
                                         <td class="p-4 pr-6">
                                             <span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-                                                <i class="fa-solid fa-check"></i> Senkronize ({data.platform})
+                                                <i class="fa-solid fa-check"></i> Senkronize (${{data.platform}})
                                             </span>
                                         </td>
                                     </tr>
@@ -498,7 +480,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_content)
 
 
-# --- ÇOKLU PLATFORM ÜRÜN SENKRONİZASYON ENDPOINT'İ ---
+# --- API ENDPOINT'LERİ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -508,7 +490,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
 
         products = []
 
-        # Platform bazlı istemci seçimi ve ürün çekme
         if platform == "shopify":
             client = ShopifyAPIClient(domain, "shp_token_dummy")
             products = client.list_products()
@@ -516,7 +497,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             client = TrendyolAPIClient("123456", "key_dummy", "secret_dummy")
             products = client.list_products()
         else:
-            # Varsayılan İkas ve Mock Kataloğu
             access_token = "ikas_fallback_token_999"
             if supabase_client:
                 try:
@@ -616,6 +596,35 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
     merchant_info = {"company_name": profile["company_name"], "address": profile["address"], "phone": profile["phone"], "email": profile["email"], "mersis_no": profile["mersis_no"]}
     html_contract = ComplianceEngine.generate_distance_sales_contract(merchant_info, {"name": "Ahmet Yılmaz"}, [{"name": "Zeytinyağı", "quantity": 1, "price": 380.00}])
     return Response(content=html_contract, media_type="text/html", headers={"Content-Disposition": f"attachment; filename=Sozlesme_{domain}.html"})
+
+
+@app.get("/api/v1/ikas/force-register")
+async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    saved, msg = save_merchant_to_supabase(domain, "mock_token")
+    return {"status": "success" if saved else "error", "store": domain}
+
+
+@app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
+async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    return HTMLResponse(content=f"<html><body><h2>Ödeme Sayfası - {domain}</h2><a href='/api/v1/billing/success?storeDomain={domain}'>Ödemeyi Tamamla</a></body></html>")
+
+
+@app.get("/api/v1/billing/success")
+async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    if supabase_client:
+        try:
+            supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
+        except Exception:
+            pass
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+
+
+@app.post("/api/v1/ikas/webhook")
+async def ikas_webhook(request: Request):
+    return {"status": "success", "message": "Webhook alındı"}
 
 
 @app.get("/")
