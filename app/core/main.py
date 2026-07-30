@@ -33,14 +33,33 @@ if SUPABASE_URL and SUPABASE_KEY:
         logger.error(f"Supabase başlatma hatası: {str(e)}")
 
 
+# --- AUDIT TRAIL (BAKANLIK DENETİM İZİ) SERVİSİ ---
+class AuditLogger:
+    @staticmethod
+    def log_event(store_domain: str, event_type: str, details: Dict[str, Any]):
+        """
+        Bakanlık denetimleri ve iç denetim için her kritik işlemi Supabase audit_logs tablosuna kaydeder.
+        """
+        log_payload = {
+            "store_domain": store_domain,
+            "event_type": event_type,
+            "details": json.dumps(details, ensure_ascii=False),
+            "created_at": datetime.utcnow().isoformat()
+        }
+        
+        logger.info(f"[AUDIT TRAIL] {store_domain} -> {event_type}: {details}")
+        
+        if supabase_client:
+            try:
+                supabase_client.table("audit_logs").insert(log_payload).execute()
+            except Exception as e:
+                logger.error(f"Audit log yazılamadı: {str(e)}")
+
+
 # --- DİNAMİK KURAL MOTORU (RULE ENGINE) ---
 class DynamicRuleEngine:
     @staticmethod
     def get_active_rule(unit: str) -> Dict[str, Any]:
-        """
-        Supabase üzerinden dinamik mevzuat kurallarını çeker. 
-        Eğer veritabanı bağlantısı yoksa varsayılan yasal kuralları döner.
-        """
         default_rule = {
             "unit": unit,
             "base_multiplier": 1.0,
@@ -62,10 +81,10 @@ class DynamicRuleEngine:
         return default_rule
 
 
-# Compliance Engine Güncellenmiş Sürümü
+# Compliance Engine (Denetim İzi Entegre)
 class ComplianceEngine:
     @staticmethod
-    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", *args, **kwargs):
+    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", *args, **kwargs):
         qty = weight_or_volume or kwargs.get("weight") or 1.0
         try:
             price = float(price)
@@ -74,9 +93,8 @@ class ComplianceEngine:
             return {"has_error": True, "message": "Geçersiz fiyat veya miktar."}
 
         if qty <= 0:
-            return {"has_error": "Geçersiz miktar/hacim."}
+            return {"has_error": True, "message": "Geçersiz miktar/hacim."}
 
-        # Dinamik Kural Motorundan Parametreleri Çek
         rule = DynamicRuleEngine.get_active_rule(unit)
         multiplier = float(rule.get("base_multiplier", 1.0))
         decimals = int(rule.get("rounding_decimals", 2))
@@ -84,6 +102,15 @@ class ComplianceEngine:
 
         base_unit_price = (price / qty) * multiplier
         rounded_price = round(base_unit_price, decimals)
+
+        # Audit Kaydı At
+        AuditLogger.log_event(store_domain, "UNIT_PRICE_CALCULATED", {
+            "price": price,
+            "qty": qty,
+            "unit": unit,
+            "calculated_unit_price": rounded_price,
+            "rule_version": reg_version
+        })
 
         return {
             "has_error": False,
@@ -103,8 +130,6 @@ class ComplianceEngine:
 
         c_name = customer_info.get("name", "Müşteri Adı Soyadı")
         c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
-        c_phone = customer_info.get("phone", "0500 000 00 00")
-        c_email = customer_info.get("email", "musteri@ornek.com")
 
         subtotal = 0.0
         items_html = ""
@@ -145,15 +170,11 @@ class ComplianceEngine:
         </head>
         <body>
             <h1>MESAFELİ SATIŞ SÖZLEŞMESİ</h1>
-            <p style="text-align: center; font-size: 11px; color: #64748b;">İşbu sözleşme 6502 sayılı Kanun ve Dinamik Kural Motoru (TR-2026-V3) güvencesiyle düzenlenmiştir.</p>
+            <p style="text-align: center; font-size: 11px; color: #64748b;">İşbu sözleşme 6502 sayılı Kanun ve Denetim İzi (Audit Trail) güvencesiyle düzenlenmiştir.</p>
 
             <h2>MADDE 1: TARAFLAR</h2>
-            <div class="box">
-                <strong>SATICI:</strong> {m_name} | Adres: {m_address} | MERSİS: {m_mersis}
-            </div>
-            <div class="box">
-                <strong>ALICI:</strong> {c_name} | Adres: {c_address}
-            </div>
+            <div class="box"><strong>SATICI:</strong> {m_name} | MERSİS: {m_mersis}</div>
+            <div class="box"><strong>ALICI:</strong> {c_name} | Adres: {c_address}</div>
 
             <h2>MADDE 2: ÜRÜNLER VE BEDELİ</h2>
             <table>
@@ -170,7 +191,7 @@ class ComplianceEngine:
             <p>Alıcı, ürünü teslim aldığı tarihten itibaren <strong>14 gün</strong> içinde cayma hakkına sahiptir.</p>
 
             <div class="legal-footer">
-                UyumHub Dinamik Mevzuat Kural Motoru ile üretilmiştir. | Tarih: {datetime.now().strftime('%Y-%m-%d')}
+                UyumHub Audit Trail & Mevzuat Kural Motoru | Tarih: {datetime.now().strftime('%Y-%m-%d')}
             </div>
         </body>
         </html>
@@ -199,9 +220,9 @@ class TrendyolAPIClient:
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Dinamik Kural Motoru & Çoklu Platform",
-    description="B2B E-Ticaret Mevzuat Uyum Servisi",
-    version="1.1.0"
+    title="UyumHub - Denetim İzi & Dinamik Kural Motoru",
+    description="B2B E-Ticaret Mevzuat Uyum ve Audit Servisi",
+    version="1.2.0"
 )
 
 app.add_middleware(
@@ -211,16 +232,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-class UnitPriceRequest(BaseModel):
-    price: float
-    weight_or_volume: float
-    unit: str = "kg"
-
-class DistanceContractRequest(BaseModel):
-    merchant_info: Dict[str, Any]
-    customer_info: Dict[str, Any]
-    cart_items: list
 
 class MerchantSettingsRequest(BaseModel):
     store_domain: str
@@ -262,6 +273,7 @@ def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "i
 
     try:
         supabase_client.table("merchants").upsert(merchant_data, on_conflict="store_domain").execute()
+        AuditLogger.log_event(domain, "MERCHANT_REGISTERED", {"platform": platform})
         return True, "Upsert başarılı"
     except Exception as e_upsert:
         try:
@@ -285,7 +297,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
         "email": "destek@uyumhub.com",
         "subscription_status": "trial",
         "platform": "ikas",
-        "plan": "UyumHub Pro Paket (Dinamik Kural Motoru)"
+        "plan": "UyumHub Pro Paket (Audit Trail Aktif)"
     }
 
     if not supabase_client:
@@ -304,7 +316,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Paket (Dinamik Kural Motoru)"
+                "plan": "UyumHub Pro Paket (Audit Trail Aktif)"
             }
     except Exception as e:
         logger.error(f"Profil okuma hatası: {str(e)}")
@@ -331,7 +343,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>UyumHub - Dinamik Kural Motoru</title>
+        <title>UyumHub - Denetim İzi & Mevzuat Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -341,10 +353,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
-                        <i class="fa-solid fa-brain"></i>
+                        <i class="fa-solid fa-shield-halved"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Dinamik Kural Motoru (Rule Engine)</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Bakanlık Denetim İzi (Audit Trail)</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
@@ -389,11 +401,11 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
                         <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-microchip"></i>
+                            <i class="fa-solid fa-clock-rotate-left"></i>
                         </div>
                         <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Kural Motoru</p>
-                            <h3 class="text-sm font-bold text-emerald-600 mt-1">Supabase Dinamik (TR-2026-V3)</h3>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Denetim İzi Durumu</p>
+                            <h3 class="text-sm font-bold text-emerald-600 mt-1">Aktif & Loglanıyor</h3>
                         </div>
                     </div>
 
@@ -411,8 +423,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Dinamik Kural Destekli Birim Fiyat Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">Veritabanından çekilen yasal kurallara göre hesaplanan etiketler.</p>
+                            <h2 class="text-base font-bold text-slate-900">Audit Trail Destekli Birim Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına uygun ve loglanan yasal etiketler.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -425,7 +437,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                     <th class="p-4">SKU</th>
                                     <th class="p-4">Satış Fiyatı</th>
                                     <th class="p-4">Miktar / Ambalaj</th>
-                                    <th class="p-4">Hesaplanan Etiket (Kural)</th>
+                                    <th class="p-4">Hesaplanan Etiket (Audit)</th>
                                     <th class="p-4 pr-6">Vitrin Durumu</th>
                                 </tr>
                             </thead>
@@ -527,7 +539,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                         <td class="p-4">
                                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                                 <i class="fa-solid fa-tag text-indigo-500"></i> ${{variant.compliance.display_text}}
-                                                <span class="text-[9px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded ml-1">${{variant.compliance.applied_rule}}</span>
+                                                <span class="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded ml-1">Logged</span>
                                             </span>
                                         </td>
                                         <td class="p-4 pr-6">
@@ -631,7 +643,8 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
-                compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit)
+                # Audit log destekli hesaplama
+                compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
 
                 variants_compliance.append({
                     "variant_id": variant.get("id"),
@@ -648,6 +661,8 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 "product_name": prod.get("name"),
                 "variants": variants_compliance
             })
+
+        AuditLogger.log_event(domain, "STORE_PRODUCTS_SYNCED", {"total_products": len(processed_products)})
 
         return {
             "status": "success",
@@ -676,6 +691,7 @@ async def update_merchant_settings(payload: MerchantSettingsRequest):
                 "email": payload.email
             }
             supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
+            AuditLogger.log_event(payload.store_domain, "MERCHANT_SETTINGS_UPDATED", update_data)
             return {"status": "success"}
         except Exception as e:
             return {"status": "error", "detail": str(e)}
@@ -689,6 +705,7 @@ async def preview_contract(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     merchant_info = {"company_name": profile["company_name"], "address": profile["address"], "phone": profile["phone"], "email": profile["email"], "mersis_no": profile["mersis_no"]}
     customer_info = {"name": "Ahmet Yılmaz", "address": "Bağdat Cad. No: 123 Kadıköy/İstanbul", "phone": "0532 111 22 33", "email": "ahmet@ornek.com"}
     cart_items = [{"name": "Ege Sızma Zeytinyağı 1000 ml", "quantity": 2, "price": 380.00}]
+    AuditLogger.log_event(domain, "CONTRACT_PREVIEWED", {})
     return HTMLResponse(content=ComplianceEngine.generate_distance_sales_contract(merchant_info, customer_info, cart_items))
 
 
@@ -698,6 +715,7 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
     profile = get_merchant_profile(domain)
     merchant_info = {"company_name": profile["company_name"], "address": profile["address"], "phone": profile["phone"], "email": profile["email"], "mersis_no": profile["mersis_no"]}
     html_contract = ComplianceEngine.generate_distance_sales_contract(merchant_info, {"name": "Ahmet Yılmaz"}, [{"name": "Zeytinyağı", "quantity": 1, "price": 380.00}])
+    AuditLogger.log_event(domain, "CONTRACT_DOWNLOADED", {})
     return Response(content=html_contract, media_type="text/html", headers={"Content-Disposition": f"attachment; filename=Sozlesme_{domain}.html"})
 
 
@@ -726,7 +744,8 @@ async def ikas_webhook(request: Request):
     try:
         body = await request.json()
         logger.info(f"İkas Webhook sinyali alındı: {json.dumps(body, ensure_ascii=False)}")
-        return {"status": "success", "message": "Webhook başarıyla işlendi."}
+        AuditLogger.log_event("system_webhook", "WEBHOOK_RECEIVED", body)
+        return {"status": "success", "message": "Webhook başarıyla işlendi ve loglandı."}
     except Exception as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
@@ -738,10 +757,10 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     return {"status": "success" if saved else "error", "store": domain}
 
 
-# --- ŞIK TASARIMLI İYZİCO CHECKOUT SAYFASI (Eksiksiz Geri Getirildi) ---
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
+    AuditLogger.log_event(domain, "CHECKOUT_STARTED", {})
     
     html_content = f"""
     <!DOCTYPE html>
@@ -800,6 +819,7 @@ async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com")
     if supabase_client:
         try:
             supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
+            AuditLogger.log_event(domain, "SUBSCRIPTION_ACTIVATED", {})
         except Exception:
             pass
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
