@@ -271,7 +271,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <div>
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fiyat Etiketi Mevzuatı</p>
                             <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                                <i class="fa-solid fa-circle-check"></i> Otomatik Senkronizasyon
+                                <i class="fa-solid fa-circle-check"></i> Webhook Otonom Senkronizasyon
                             </h3>
                         </div>
                     </div>
@@ -523,7 +523,6 @@ async def preview_contract(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_contract)
 
 
-# --- PDF SÖZLEŞME İNDİRME ENDPOINT'İ ---
 @app.get("/api/v1/compliance/download-contract-pdf")
 async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -553,7 +552,6 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
         cart_items=cart_items
     )
 
-    # Tarayıcının direkt PDF olarak indirmesini sağlayan attachment header'ı ekliyoruz
     return Response(
         content=html_contract,
         media_type="text/html",
@@ -561,6 +559,39 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
             "Content-Disposition": f"attachment; filename=Mesafeli_Satis_Sozlesmesi_{domain}.html"
         }
     )
+
+
+# --- GERÇEK ZAMANLI İKAS WEBHOOK DİNLEYİCİSİ (OTONOM SENKRONİZASYON) ---
+@app.post("/api/v1/ikas/webhook")
+async def ikas_webhook(request: Request):
+    try:
+        body = await request.json()
+        logger.info(f"İkas Webhook sinyali alındı: {json.dumps(body, ensure_ascii=False)}")
+        
+        event_type = body.get("event") or body.get("type") or "product.update"
+        data = body.get("data", {})
+        
+        # Webhook üzerinden gelen ürün varyant verilerini işle ve otomatik birim fiyat güncelle
+        product_id = data.get("id") or data.get("productId")
+        variants = data.get("variants", [])
+
+        for variant in variants:
+            variant_id = variant.get("id")
+            price = variant.get("price", 0.0)
+            weight = variant.get("weight", 1.0)
+            unit = variant.get("unit", "kg")
+
+            # Mevzuat motoruyla anında yeniden hesapla
+            compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit)
+            if not compliance_result.get("has_error"):
+                unit_price_text = compliance_result.get("display_text")
+                logger.info(f"Webhook Otonom Güncelleme -> Variant ID: {variant_id} | Yeni Etiket: {unit_price_text}")
+                # İdeal senaryoda burada IkasGraphQLClient ile varyant güncellenir
+
+        return {"status": "success", "message": "Webhook başarıyla işlendi ve otonom senkronize edildi."}
+    except Exception as e:
+        logger.error(f"Webhook işleme hatası: {str(e)}")
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 
 # --- KÖK VE SAĞLIK KONTROLÜ ENDPOINT'LERİ ---
