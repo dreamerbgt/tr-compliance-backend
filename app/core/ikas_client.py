@@ -19,9 +19,6 @@ class IkasGraphQLClient:
         }
 
     def _execute_query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        İkas GraphQL API'sine standart urllib ile güvenli sorgu gönderir.
-        """
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
@@ -37,10 +34,10 @@ class IkasGraphQLClient:
             
             with urllib.request.urlopen(req, timeout=15) as response:
                 res_body = json.loads(response.read().decode("utf-8"))
-                if "errors" in res_body:
+                if isinstance(res_body, dict) and "errors" in res_body:
                     logger.error(f"GraphQL Hata Döndürdü: {res_body['errors']}")
                     return {"success": False, "errors": res_body["errors"]}
-                return {"success": True, "data": res_body.get("data", {})}
+                return {"success": True, "data": res_body.get("data") if isinstance(res_body, dict) else {}}
         except urllib.error.HTTPError as e:
             logger.error(f"İkas API HTTP Hatası: {e.code} - {e.reason}")
             return {"success": False, "error": f"HTTP {e.code}: {e.reason}"}
@@ -49,9 +46,6 @@ class IkasGraphQLClient:
             return {"success": False, "error": str(e)}
 
     def list_products(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """
-        Mağazadaki ürün listesini, fiyatlarını ve ağırlık/hacim detaylarını getirir.
-        """
         query = """
         query listProducts($limit: Int) {
           listProduct(limit: $limit) {
@@ -69,7 +63,11 @@ class IkasGraphQLClient:
           }
         }
         """
-        result = self._execute_query(query, {"limit": limit})
-        if result.get("success") and "listProduct" in result.get("data", {}):
-            return result["data"]["listProduct"].get("data", [])
+        try:
+            result = self._execute_query(query, {"limit": limit})
+            data = result.get("data") if isinstance(result, dict) else {}
+            if isinstance(data, dict) and "listProduct" in data and isinstance(data["listProduct"], dict):
+                return data["listProduct"].get("data", []) or []
+        except Exception as e:
+            logger.error(f"list_products işlenirken hata: {str(e)}")
         return []

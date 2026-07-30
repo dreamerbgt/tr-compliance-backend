@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import traceback
 import urllib.request
 import urllib.parse
 from typing import Optional, Dict, Any
@@ -160,94 +161,108 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     }
 
 
-# --- ÜRÜN SENKRONİZASYON VE BİRİM FİYAT ENDPOINT'İ (MOCK KATMANLI) ---
+# --- ÜRÜN SENKRONİZASYON VE BİRİM FİYAT ENDPOINT'İ (DETAYLI HATA RAPORLAMALI) ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    domain = normalize_domain(storeDomain)
+    try:
+        domain = normalize_domain(storeDomain)
 
-    access_token = "ikas_fallback_token_999"
-    if supabase_client:
-        try:
-            res = supabase_client.table("merchants").select("access_token").eq("store_domain", domain).execute()
-            if res.data:
-                access_token = res.data[0].get("access_token")
-            else:
-                save_merchant_to_supabase(domain, access_token)
-        except Exception as e:
-            logger.error(f"Supabase okuma hatası: {str(e)}")
+        access_token = "ikas_fallback_token_999"
+        if supabase_client:
+            try:
+                res = supabase_client.table("merchants").select("access_token").eq("store_domain", domain).execute()
+                if res.data:
+                    access_token = res.data[0].get("access_token")
+                else:
+                    save_merchant_to_supabase(domain, access_token)
+            except Exception as e:
+                logger.error(f"Supabase okuma hatası: {str(e)}")
 
-    products = []
-    if IkasGraphQLClient:
-        try:
-            client = IkasGraphQLClient(access_token=access_token)
-            products = client.list_products(limit=10)
-        except Exception as e:
-            logger.warning(f"Ikas GraphQL veri çekme hatası (Mock veriye geçiliyor): {str(e)}")
+        products = []
+        if IkasGraphQLClient:
+            try:
+                client = IkasGraphQLClient(access_token=access_token)
+                products = client.list_products(limit=10)
+            except Exception as e:
+                logger.warning(f"Ikas GraphQL veri çekme hatası (Mock veriye geçiliyor): {str(e)}")
 
-    # Eğer İkas'tan ürün gelmediyse mevzuat motorumuzu test etmek için Mock Ürün Kataloğu
-    if not products:
-        products = [
-            {
-                "id": "prod_001",
-                "name": "Ege Sızma Zeytinyağı 1000 ml",
-                "variants": [
-                    {"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}
-                ]
-            },
-            {
-                "id": "prod_002",
-                "name": "Organik Çam Balı 850 gr",
-                "variants": [
-                    {"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}
-                ]
-            },
-            {
-                "id": "prod_003",
-                "name": "Antep Fıstığı Ezmesi 350 gr",
-                "variants": [
-                    {"id": "var_003", "sku": "FST-350G", "price": 245.00, "weight": 0.35, "unit": "kg"}
-                ]
-            }
-        ]
+        # Eğer İkas'tan ürün gelmediyse mevzuat motorunu test etmek için Mock Ürün Kataloğu
+        if not products:
+            products = [
+                {
+                    "id": "prod_001",
+                    "name": "Ege Sızma Zeytinyağı 1000 ml",
+                    "variants": [
+                        {"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}
+                    ]
+                },
+                {
+                    "id": "prod_002",
+                    "name": "Organik Çam Balı 850 gr",
+                    "variants": [
+                        {"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}
+                    ]
+                },
+                {
+                    "id": "prod_003",
+                    "name": "Antep Fıstığı Ezmesi 350 gr",
+                    "variants": [
+                        {"id": "var_003", "sku": "FST-350G", "price": 245.00, "weight": 0.35, "unit": "kg"}
+                    ]
+                }
+            ]
 
-    processed_products = []
-    for prod in products:
-        prod_id = prod.get("id")
-        prod_name = prod.get("name")
-        variants_compliance = []
+        processed_products = []
+        for prod in products:
+            prod_id = prod.get("id")
+            prod_name = prod.get("name")
+            variants_compliance = []
 
-        for variant in prod.get("variants", []):
-            price = variant.get("price", 0.0)
-            weight = variant.get("weight", 1.0)
-            unit = variant.get("unit", "kg")
+            for variant in prod.get("variants", []):
+                price = variant.get("price", 0.0)
+                weight = variant.get("weight", 1.0)
+                unit = variant.get("unit", "kg")
 
-            compliance_result = ComplianceEngine.calculate_unit_price(
-                price=price,
-                weight_or_volume=weight,
-                unit=unit
-            )
+                compliance_result = ComplianceEngine.calculate_unit_price(
+                    price=price,
+                    weight_or_volume=weight,
+                    unit=unit
+                )
 
-            variants_compliance.append({
-                "variant_id": variant.get("id"),
-                "sku": variant.get("sku"),
-                "price": price,
-                "weight": weight,
-                "unit": unit,
-                "compliance": compliance_result
+                variants_compliance.append({
+                    "variant_id": variant.get("id"),
+                    "sku": variant.get("sku"),
+                    "price": price,
+                    "weight": weight,
+                    "unit": unit,
+                    "compliance": compliance_result
+                })
+
+            processed_products.append({
+                "product_id": prod_id,
+                "product_name": prod_name,
+                "variants": variants_compliance
             })
 
-        processed_products.append({
-            "product_id": prod_id,
-            "product_name": prod_name,
-            "variants": variants_compliance
-        })
+        return {
+            "status": "success",
+            "store": domain,
+            "total_processed": len(processed_products),
+            "products": processed_products
+        }
 
-    return {
-        "status": "success",
-        "store": domain,
-        "total_processed": len(processed_products),
-        "products": processed_products
-    }
+    except Exception as err:
+        tb = traceback.format_exc()
+        logger.error(f"sync_products endpoint hatası: {str(err)}\n{tb}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": "Ürün senkronizasyonu sırasında beklenmeyen bir hata oluştu.",
+                "detail": str(err),
+                "traceback": tb.splitlines()[-3:] if tb else []
+            }
+        )
 
 
 # --- İKAS LAUNCH & CALLBACK ENDPOINT'LERİ ---
