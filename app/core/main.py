@@ -102,11 +102,10 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
     if not supabase_client:
         return False, "Supabase bağlantısı yok."
     
+    # Sadece veritabanında kesin var olan temel alanlar gönderiliyor
     merchant_data = {
         "store_domain": domain,
-        "access_token": access_token,
-        "platform": "ikas",
-        "status": "active"
+        "access_token": access_token
     }
 
     try:
