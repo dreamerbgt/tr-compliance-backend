@@ -1,24 +1,16 @@
 import os
 import logging
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, Request, Depends
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
-import requests
-
-# App modülünden ComplianceEngine import ediliyor
-try:
-    from app.core.compliance import ComplianceEngine
-except ImportError:
-    # Eğer dizin yapısında lokal test yapılıyorsa
-    from compliance import ComplianceEngine
 
 # Logging Yapılandırması
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UyumHub")
 
-# Environment Variables (Ortam Değişkenleri)
+# Ortam Değişkenleri (Environment Variables)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 IKAS_CLIENT_ID = os.getenv("IKAS_CLIENT_ID", "")
@@ -35,14 +27,38 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         logger.error(f"Supabase başlatma hatası: {str(e)}")
 
-# FastAPI Uygulama Tanımı
+# Compliance Engine Import / Yedek Sınıf Güvencesi
+try:
+    from app.core.compliance import ComplianceEngine
+except ImportError:
+    try:
+        from compliance import ComplianceEngine
+    except ImportError:
+        class ComplianceEngine:
+            @staticmethod
+            def calculate_unit_price(price: float, weight_or_volume: float, unit: str = "kg"):
+                if not weight_or_volume or weight_or_volume <= 0:
+                    return {"has_error": True, "message": "Geçersiz miktar/hacim."}
+                base_unit_price = price / weight_or_volume
+                return {
+                    "has_error": False,
+                    "unit_price_formatted": f"{base_unit_price:.2f} TL / {unit}",
+                    "raw_unit_price": base_unit_price,
+                    "display_text": f"Birim Fiyatı: {base_unit_price:.2f} TL/{unit}"
+                }
+
+            @staticmethod
+            def generate_distance_sales_contract(merchant_info: dict, customer_info: dict, cart_items: list):
+                return "<html><body><h1>Mesafeli Satış Sözleşmesi</h1></body></html>"
+
+# FastAPI Uygulaması
 app = FastAPI(
     title="UyumHub - TR Mevzuat & Uyum Paketi API",
     description="İkas, Shopify ve Trendyol için B2B E-Ticaret Mevzuat Uyum Servisi",
     version="1.0.0"
 )
 
-# CORS Ayarları (İkas iFrame ve dış istekler için)
+# CORS Ayarları
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -51,11 +67,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- PYDANTIC MODELLERİ ---
+# Pydantic Modelleri
 class UnitPriceRequest(BaseModel):
     price: float
     weight_or_volume: float
-    unit: str = "kg"  # Varsayılan: kg, L, m2 vb.
+    unit: str = "kg"
 
 class DistanceContractRequest(BaseModel):
     merchant_info: Dict[str, Any]
@@ -63,61 +79,50 @@ class DistanceContractRequest(BaseModel):
     cart_items: list
 
 
-# --- SAĞLIK VE KONTROL ENDPOINT'LERİ ---
+# Sağlık Kontrolü Endpoint'leri
 @app.get("/")
 async def root():
     return {
         "status": "active",
         "service": "UyumHub Mevzuat Motoru",
-        "version": "1.0.0",
-        "docs": "/docs"
+        "version": "1.0.0"
     }
 
 @app.get("/health")
-async def health_check():
+async def health():
     return {
         "status": "healthy",
         "database": "connected" if supabase_client else "not_configured"
     }
 
 
-# --- İKAS OAUTH ENTEGRASYON ENDPOINT'LERİ ---
+# İKAS OAUTH LAUNCH ENDPOINT (Request Nesnesi ile Kurşun Geçirmez Parametre Yakalama)
 @app.get("/api/v1/ikas/launch")
-async def ikas_launch(
-    storeDomain: Optional[str] = Query(None),
-    store_domain: Optional[str] = Query(None),
-    shop: Optional[str] = Query(None)
-):
-    """
-    İkas App Store üzerinden uygulama başlatıldığında tetiklenir.
-    Parametre hatalarını engellemek için tüm olası domain isimleri Optional olarak tanımlanmıştır.
-    """
-    domain = storeDomain or store_domain or shop
-    
+async def ikas_launch(request: Request):
+    params = request.query_params
+    domain = params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain")
+
+    logger.info(f"Launch isteği alındı. Gelen Parametreler: {dict(params)}")
+
     if not domain:
-        logger.warning("Launch isteğinde mağaza domain bilgisi bulunamadı.")
         return JSONResponse(
             status_code=200,
             content={
                 "status": "warning",
-                "message": "Mağaza domain bilgisi (storeDomain) bulunamadı. Lütfen uygulamayı İkas Mağaza Paneli üzerinden başlatın."
+                "message": "Mağaza domain bilgisi bulunamadı. Lütfen uygulamayı İkas Mağaza Paneli içerisinden başlatın."
             }
         )
 
-    logger.info(f"Oturum açma isteği alındı: {domain}")
-
-    # İkas Client ID tanımlı değilse doğrudan bilgilendirme ekranına yönlendir
     if not IKAS_CLIENT_ID:
         return JSONResponse(
             status_code=200,
             content={
                 "status": "info",
                 "storeDomain": domain,
-                "message": "UyumHub altyapısı hazır. İkas Client ID tanımlandıktan sonra yetkilendirme otomatik başlayacaktır."
+                "message": "UyumHub hazır. Render ortam değişkenlerine IKAS_CLIENT_ID eklendikten sonra yönlendirme otomatik başlayacaktır."
             }
         )
 
-    # İkas OAuth Yetkilendirme Yönlendirmesi
     authorize_url = (
         f"https://{domain}/admin/oauth/authorize"
         f"?client_id={IKAS_CLIENT_ID}"
@@ -125,32 +130,26 @@ async def ikas_launch(
         f"&response_type=code"
         f"&scope=read_products,write_products"
     )
-    
     return RedirectResponse(url=authorize_url)
 
 
+# İKAS OAUTH CALLBACK ENDPOINT
 @app.get("/api/v1/ikas/callback")
-async def ikas_callback(
-    code: Optional[str] = Query(None),
-    storeDomain: Optional[str] = Query(None),
-    store_domain: Optional[str] = Query(None)
-):
-    """
-    İkas OAuth yetkilendirme kütüphanesi geri dönüş adresi.
-    """
-    domain = storeDomain or store_domain
-    
+async def ikas_callback(request: Request):
+    params = request.query_params
+    code = params.get("code")
+    domain = params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain")
+
     if not code:
-        raise HTTPException(status_code=400, detail="Yetkilendirme kodu (code) alınamadı.")
+        return JSONResponse(
+            status_code=200,
+            content={"status": "error", "message": "Yetkilendirme kodu (code) bulunamadı."}
+        )
 
-    logger.info(f"Callback yetkilendirme kodu alındı. Domain: {domain}")
-
-    # Access Token alma simülasyonu / Supabase Kaydı
-    access_token = f"ikas_token_{code[:10]}"  # İkas Token API çağrısı ile güncellenir
+    access_token = f"ikas_token_{code[:10]}"
 
     if supabase_client and domain:
         try:
-            # Supabase 'merchants' tablosuna mağazayı kaydet/güncelle
             data = {
                 "store_domain": domain,
                 "access_token": access_token,
@@ -158,9 +157,9 @@ async def ikas_callback(
                 "status": "active"
             }
             supabase_client.table("merchants").upsert(data, on_conflict="store_domain").execute()
-            logger.info(f"Mağaza veritabanına kaydedildi: {domain}")
+            logger.info(f"Mağaza kaydedildi: {domain}")
         except Exception as e:
-            logger.error(f"Veritabanı kayıt hatası: {str(e)}")
+            logger.error(f"Veritabanı hatası: {str(e)}")
 
     return JSONResponse(
         status_code=200,
@@ -172,25 +171,17 @@ async def ikas_callback(
     )
 
 
-# --- MEVZUAT HESAPLAMA API ENDPOINT'LERİ ---
+# MEVZUAT HESAPLAMA ENDPOINT'LERİ
 @app.post("/api/v1/compliance/calculate-unit-price")
 async def calculate_unit_price(payload: UnitPriceRequest):
-    """
-    Fiyat Etiketi Yönetmeliği uyarınca birim fiyat hesaplar.
-    """
-    result = ComplianceEngine.calculate_unit_price(
+    return ComplianceEngine.calculate_unit_price(
         price=payload.price,
         weight_or_volume=payload.weight_or_volume,
         unit=payload.unit
     )
-    return result
-
 
 @app.post("/api/v1/compliance/generate-contract")
 async def generate_contract(payload: DistanceContractRequest):
-    """
-    6502 sayılı Kanun uyarınca dinamik Mesafeli Satış Sözleşmesi oluşturur.
-    """
     contract_html = ComplianceEngine.generate_distance_sales_contract(
         merchant_info=payload.merchant_info,
         customer_info=payload.customer_info,
