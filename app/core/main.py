@@ -180,7 +180,7 @@ class TrendyolAuditEngine:
 app = FastAPI(
     title="UyumHub - Mevzuat Platformu",
     description="B2B E-Ticaret Compliance Servisi",
-    version="2.3.0"
+    version="2.4.0"
 )
 
 # CORS Ayarları
@@ -193,12 +193,13 @@ app.add_middleware(
 )
 
 
-# --- CRITICAL FIX: İKAS IFRAME YÜKLEME ENGELİNİ KALDIRAN MIDDLEWARE ---
+# --- IFRAME ENGELİNİ VE TIKANMALARI ÇÖZEN GLOBAL MIDDLEWARE ---
 @app.middleware("http")
 async def disable_frame_restrictions(request: Request, call_next):
     response = await call_next(request)
-    # İkas iframe engelini kesin olarak kaldırır
+    # İkas iframe yüklemesine tam izin ver
     response.headers["Content-Security-Policy"] = "frame-ancestors *;"
+    response.headers["Access-Control-Allow-Origin"] = "*"
     if "X-Frame-Options" in response.headers:
         del response.headers["X-Frame-Options"]
     if "x-frame-options" in response.headers:
@@ -253,13 +254,12 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     return default_profile
 
 
-# --- HTML BUILDER (DEV vs NORMAL KULLANICI AYRIMI) ---
+# --- HTML BUILDER (İKAS ADMIN SİNYAL EL SIKIŞMASI DÂHİL) ---
 def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
     platform_name = profile["platform"]
     
-    # Sadece geliştirici veya test mağazalarında görünecek araçlar
     is_developer_store = is_dev or ("dev-" in domain) or ("test" in domain)
 
     dev_tools_html = ""
@@ -291,6 +291,21 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
         <title>UyumHub - Mağaza Mevzuat Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+        
+        <!-- İKAS ADMIN İFRAME YÜKLEME ÇARKINI DURDURAN EL SIKIŞMA (POSTMESSAGE) SCRIPT -->
+        <script>
+            function sendIkasLoadedSignal() {{
+                try {{
+                    window.parent.postMessage({{ type: "IKAS_APP_LOADED", loaded: true, ready: true }}, "*");
+                    window.parent.postMessage("IKAS_APP_READY", "*");
+                    window.parent.postMessage("APP_LOADED", "*");
+                }} catch(e) {{ console.log("Iframe handshake:", e); }}
+            }}
+            window.addEventListener("DOMContentLoaded", sendIkasLoadedSignal);
+            window.addEventListener("load", sendIkasLoadedSignal);
+            setTimeout(sendIkasLoadedSignal, 300);
+            setTimeout(sendIkasLoadedSignal, 1000);
+        </script>
     </head>
     <body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen p-6">
         <div class="max-w-6xl mx-auto space-y-6">
@@ -416,7 +431,10 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
             function runSync() {{ loadProducts(); }}
             function startCheckout() {{ window.location.href = `/api/v1/billing/checkout?storeDomain=${{encodeURIComponent(storeDomain)}}`; }}
 
-            window.onload = loadProducts;
+            window.onload = function() {{
+                sendIkasLoadedSignal();
+                loadProducts();
+            }};
         </script>
     </body>
     </html>
@@ -430,7 +448,7 @@ async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattest
     return HTMLResponse(content=build_dashboard_html(storeDomain, is_dev=is_dev))
 
 
-# --- ROUTE 2: İKAS LAUNCH & CALLBACK (DOĞRUDAN IFRAME RENDER) ---
+# --- ROUTE 2: İKAS LAUNCH & CALLBACK ---
 @app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
 async def ikas_launch(request: Request):
     params = dict(request.query_params)
