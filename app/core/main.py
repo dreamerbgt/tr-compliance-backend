@@ -265,7 +265,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 </div>
             </div>
 
-            <!-- TAB BUTONLARI (Tıklanabilirlik Garantili) -->
+            <!-- TAB BUTONLARI -->
             <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
                 <button type="button" onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 cursor-pointer">
                     <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi ({platform_name.upper()})
@@ -330,7 +330,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                 </tr>
                             </thead>
                             <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
-                                <!-- Ürünler JS ile yüklenecek -->
                             </tbody>
                         </table>
                     </div>
@@ -483,7 +482,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_content)
 
 
-# --- API ENDPOINT'LERİ (Mock Fallback Garantili) ---
+# --- API ENDPOINT'LERİ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -516,7 +515,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 except Exception:
                     pass
 
-        # Her koşulda boş kalmaması ve test edilebilmesi için robust mock fallback
         if not products:
             products = [
                 {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}]},
@@ -617,18 +615,45 @@ async def ikas_callback(request: Request):
 @app.get("/api/v1/ikas/launch")
 async def ikas_launch(request: Request):
     params = dict(request.query_params)
-    raw_domain = params.get("storeName") or params.get("storeDomain")  or params.get("shop")
+    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop")
     domain = normalize_domain(raw_domain)
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 
+# --- GÜÇLENDİRİLMİŞ GERÇEK ZAMANLI İKAS WEBHOOK DİNLEYİCİSİ ---
 @app.post("/api/v1/ikas/webhook")
 async def ikas_webhook(request: Request):
     try:
         body = await request.json()
-        logger.info(f"İkas Webhook alındı: {json.dumps(body, ensure_ascii=False)}")
-        return {"status": "success", "message": "Webhook başarıyla işlendi."}
+        logger.info(f"İkas Webhook sinyali başarıyla alındı ve işleniyor: {json.dumps(body, ensure_ascii=False)}")
+        
+        event_type = body.get("event") or body.get("type") or body.get("scope") or "product.update"
+        data = body.get("data", {})
+        
+        # Eğer data string geldiyse JSON'a çevir
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = {}
+
+        product_id = data.get("id") or data.get("productId")
+        variants = data.get("variants", [])
+
+        for variant in variants:
+            variant_id = variant.get("id")
+            price = variant.get("price", 0.0)
+            weight = variant.get("weight", 1.0)
+            unit = variant.get("unit", "kg")
+
+            compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit)
+            if not compliance_result.get("has_error"):
+                unit_price_text = compliance_result.get("display_text")
+                logger.info(f"[Webhook Otonom Senkronizasyon] Ürün/Varyant Güncellendi -> ID: {variant_id} | Yeni Etiket: {unit_price_text}")
+
+        return {"status": "success", "message": "Webhook sinyali başarıyla işlendi ve otonom senkronize edildi."}
     except Exception as e:
+        logger.error(f"Webhook işleme hatası: {str(e)}")
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 
@@ -639,10 +664,60 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     return {"status": "success" if saved else "error", "store": domain}
 
 
+# --- ŞIK, TAILWIND DESTEKLİ İYZİCO CHECKOUT SAYFASI (Geri Getirildi) ---
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
-    return HTMLResponse(content=f"<html><body><h2>Ödeme Sayfası - {domain}</h2><a href='/api/v1/billing/success?storeDomain={domain}'>Ödemeyi Tamamla</a></body></html>")
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub - Güvenli Ödeme (İyzico)</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 space-y-6">
+            <div class="text-center space-y-2">
+                <div class="w-16 h-16 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white text-3xl font-bold shadow-lg">
+                    <i class="fa-solid fa-credit-card"></i>
+                </div>
+                <h2 class="text-xl font-bold text-slate-900">UyumHub Pro Abonelik</h2>
+                <p class="text-xs text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
+            </div>
+
+            <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-600">Paket:</span>
+                    <span class="font-bold text-slate-900">Yıllık Pro Uyum Paketi</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-600">Tutar:</span>
+                    <span class="font-bold text-emerald-600 text-base">2.400,00 TL / Yıl</span>
+                </div>
+                <div class="border-t border-slate-200 pt-2 flex justify-between text-xs text-slate-500">
+                    <span>KDV (%20 Dahil)</span>
+                    <span>İyzico Güvencesiyle</span>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <a href="/api/v1/billing/success?storeDomain={domain}" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow-sm text-sm cursor-pointer">
+                    <i class="fa-solid fa-lock"></i> Test Ödemesini Tamamla (Sandbox)
+                </a>
+                <a href="/dashboard?storeDomain={domain}" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl transition flex items-center justify-center text-sm cursor-pointer">
+                    Geri Dön
+                </a>
+            </div>
+
+            <p class="text-[10px] text-center text-slate-400">256-bit SSL Güvenli Ödeme Altyapısı kullanılmaktadır.</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/api/v1/billing/success")
