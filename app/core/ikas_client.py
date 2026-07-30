@@ -1,5 +1,7 @@
+import json
 import logging
-import requests
+import urllib.request
+import urllib.error
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("UyumHub.IkasClient")
@@ -12,27 +14,36 @@ class IkasGraphQLClient:
         self.headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
-            "User-Agent": "UyumHub/1.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) UyumHub/1.0",
+            "Accept": "application/json"
         }
 
     def _execute_query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        İkas GraphQL API'sine sorgu gönderir.
+        İkas GraphQL API'sine standart urllib ile güvenli sorgu gönderir.
         """
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
 
         try:
-            response = requests.post(self.GRAPHQL_URL, json=payload, headers=self.headers, timeout=15)
-            response.raise_for_status()
-            res_data = response.json()
-
-            if "errors" in res_data:
-                logger.error(f"GraphQL Hata Döndürdü: {res_data['errors']}")
-                return {"success": False, "errors": res_data["errors"]}
-
-            return {"success": True, "data": res_data.get("data", {})}
+            payload_bytes = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                self.GRAPHQL_URL,
+                data=payload_bytes,
+                headers=self.headers,
+                method="POST"
+            )
+            
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_body = json.loads(response.read().decode("utf-8"))
+                if "errors" in res_body:
+                    logger.error(f"GraphQL Hata Döndürdü: {res_body['errors']}")
+                    return {"success": False, "errors": res_body["errors"]}
+                return {"success": True, "data": res_body.get("data", {})}
+        except urllib.error.HTTPError as e:
+            logger.error(f"İkas API HTTP Hatası: {e.code} - {e.reason}")
+            return {"success": False, "error": f"HTTP {e.code}: {e.reason}"}
         except Exception as e:
             logger.error(f"İkas API Bağlantı Hatası: {str(e)}")
             return {"success": False, "error": str(e)}
