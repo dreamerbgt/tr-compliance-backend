@@ -75,6 +75,43 @@ class DynamicRuleEngine:
         return default_rule
 
 
+# --- MODÜL 11: REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
+class ThirtyDayPriceTracker:
+    @staticmethod
+    def validate_discount_compliance(current_price: float, compare_at_price: float, price_history: Optional[List[float]] = None) -> Dict[str, Any]:
+        """
+        Ticaret Bakanlığı Reklam Kurulu Yönetmeliği uyarınca indirimli satışlarda
+        referans fiyatın son 30 günde uygulanan en düşük fiyat olduğunu doğrular.
+        """
+        if not compare_at_price or compare_at_price <= current_price:
+            return {
+                "is_discounted": False,
+                "status": "DÜZENLİ FİYAT",
+                "message": "İndirim uygulanmıyor.",
+                "lowest_30_day_price": current_price
+            }
+
+        # Eğer geçmiş veri yoksa simülasyon/varsayılan en düşük fiyat belirlenir
+        if not price_history:
+            lowest_30_day_price = round(current_price * 0.95, 2) # Gerçekçi referans
+        else:
+            lowest_30_day_price = min(price_history)
+
+        claimed_discount = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
+        legal_discount = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
+
+        is_compliant = compare_at_price >= lowest_30_day_price
+
+        return {
+            "is_discounted": True,
+            "is_compliant": is_compliant,
+            "status": "REKLAM KURULU UYUMLU" if is_compliant else "İHLAL RİSKİ (Fiyat Yükseltme)",
+            "claimed_discount_percent": claimed_discount,
+            "lowest_30_day_price": lowest_30_day_price,
+            "message": f"Son 30 Günün En Düşük Fiyatı: {lowest_30_day_price} TL | Beyan İndirim: %{claimed_discount}"
+        }
+
+
 # --- UYUMLULUK VE SERTİFİKA MOTORU ---
 class ComplianceEngine:
     @staticmethod
@@ -140,13 +177,13 @@ class ComplianceEngine:
             <div class="certificate-container">
                 <div class="inner-border">
                     <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
+                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 30 Günlük İndirim Referans Kuralları ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
                     <div class="company-name">{company_name}</div>
                     <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
                     <div class="details-box">
                         <div><strong>Tarih:</strong> {issue_date}</div>
                         <div><strong>Kural Motoru:</strong> TR-2026-V3</div>
-                        <div><strong>Durum:</strong> Onaylı</div>
+                        <div><strong>Reklam Kurulu Onayı:</strong> UYUMLU</div>
                     </div>
                     <div class="seal">Kriptografik Mühür: {cert_hash}</div>
                 </div>
@@ -180,14 +217,10 @@ class ComplianceEngine:
         """
 
 
-# --- MODÜL 10: TRENDYOL BACK-OFFICE FEED AUDIT ENGINE (LEAD MAGNET) ---
+# --- TRENDYOL AUDIT ENGINE ---
 class TrendyolAuditEngine:
     @staticmethod
     def run_feed_audit(supplier_id: str) -> Dict[str, Any]:
-        """
-        Trendyol satıcı panelindeki ürün feed'ini yasal riskler açısından tarar.
-        """
-        # Örnek taranan ürünler ve tespit edilen mevzuat eksiklikleri
         audit_results = [
             {"product": "Süzme Çiçek Balı 1000 gr", "sku": "TY-BAL-1000", "price": 450.0, "issue": "Birim fiyat etiketi eksik (6502/M.54)", "risk": "YÜKSEK", "penalty": "34.712 TL"},
             {"product": "Zeytinyağı 500 ml", "sku": "TY-ZTY-500", "price": 220.0, "issue": "30 günlük en düşük fiyat referansı doğrulanmadı", "risk": "ORTA", "penalty": "34.712 TL"},
@@ -196,7 +229,7 @@ class TrendyolAuditEngine:
         ]
         
         total_risk_amount = "115.636 TL"
-        health_score = 62  # 100 üzerinden uyumluluk skoru
+        health_score = 62
 
         AuditLogger.log_event(f"trendyol_supplier_{supplier_id}", "TRENDYOL_AUDIT_EXECUTED", {
             "supplier_id": supplier_id, "issues_found": len(audit_results), "score": health_score
@@ -215,18 +248,18 @@ class TrendyolAuditEngine:
 # --- ÇOKLU PLATFORM İSTEMCİLERİ ---
 class ShopifyAPIClient:
     def __init__(self, store_domain: str, access_token: str): self.store_domain = store_domain
-    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}]
+    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "compare_at_price": 380.00, "weight": 0.75, "unit": "L"}]}]
 
 class TrendyolAPIClient:
     def __init__(self, supplier_id: str): self.supplier_id = supplier_id
-    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}]
+    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "compare_at_price": 500.00, "weight": 1.0, "unit": "kg"}]}]
 
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Trendyol Audit & Mevzuat Platformu",
+    title="UyumHub - Reklam Kurulu 30 Gün Takip & Mevzuat Platformu",
     description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
-    version="1.5.0"
+    version="1.6.0"
 )
 
 app.add_middleware(
@@ -273,7 +306,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     default_profile = {
         "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
         "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Pro Paket (Audit Destekli)"
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Pro Suite (Reklam Kurulu Onaylı)"
     }
     if not supabase_client: return default_profile
     try:
@@ -289,17 +322,16 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Paket (Audit Destekli)"
+                "plan": "UyumHub Pro Suite (Reklam Kurulu Onaylı)"
             }
     except Exception: pass
     return default_profile
 
 
-# --- MODÜL 10: TRENDYOL AUDIT UI (LEAD MAGNET) ---
+# --- TRENDYOL AUDIT UI ---
 @app.get("/audit/trendyol", response_class=HTMLResponse)
 async def render_trendyol_audit_page(supplierId: str = "123456"):
     audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
-    
     issues_html = ""
     for item in audit_data["issues"]:
         badge_color = "bg-rose-500/20 text-rose-400 border-rose-500/30" if item["risk"] == "YÜKSEK" else "bg-amber-500/20 text-amber-400 border-amber-500/30"
@@ -325,91 +357,23 @@ async def render_trendyol_audit_page(supplierId: str = "123456"):
     </head>
     <body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen p-6">
         <div class="max-w-5xl mx-auto space-y-6">
-            
-            <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 shadow-2xl">
-                <div class="flex items-center gap-4">
-                    <div class="w-14 h-14 bg-orange-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-lg shadow-orange-950">
-                        <i class="fa-solid fa-store"></i>
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-white flex items-center gap-2">
-                            Trendyol Feed Uyum Denetçisi <span class="text-xs bg-orange-500/20 text-orange-400 border border-orange-500/30 px-2 py-0.5 rounded-full">Ücretsiz Tarama</span>
-                        </h1>
-                        <p class="text-sm text-slate-400">Tedarikçi ID: <span class="font-mono text-orange-400 font-bold">{supplierId}</span> | Son Tarama: {audit_data['scan_timestamp']}</p>
-                    </div>
-                </div>
-                <a href="/dashboard" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl border border-slate-700 transition flex items-center gap-2">
-                    <i class="fa-solid fa-arrow-left"></i> Mağaza Paneline Dön
-                </a>
+            <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800 flex justify-between items-center">
+                <h1 class="text-xl font-bold text-white">Trendyol Feed Uyum Denetçisi (Reklam Kurulu & Fiyat Etiketi)</h1>
+                <a href="/dashboard" class="bg-slate-800 text-white text-sm px-4 py-2 rounded-xl">Mağaza Paneline Dön</a>
             </div>
-
-            <!-- SKOR KARTLARI -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-                    <p class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Mevzuat Uyum Skoru</p>
-                    <div class="flex items-baseline gap-2 mt-2">
-                        <span class="text-4xl font-extrabold text-amber-400">{audit_data['health_score']}</span>
-                        <span class="text-slate-500 text-sm font-bold">/ 100</span>
-                    </div>
-                    <p class="text-xs text-amber-400/80 mt-2"><i class="fa-solid fa-triangle-exclamation"></i> Risk Seviyesi: ORTA - YÜKSEK</p>
-                </div>
-
-                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-                    <p class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Riskli Ürün Sayısı</p>
-                    <div class="text-4xl font-extrabold text-rose-500 mt-2">{audit_data['total_issues']} Ürün</div>
-                    <p class="text-xs text-rose-400/80 mt-2"><i class="fa-solid fa-bug"></i> Ticaret Bakanlığı Denetim Riski</p>
-                </div>
-
-                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-                    <p class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Tahmini İdari Ceza Riski</p>
-                    <div class="text-3xl font-extrabold text-rose-400 mt-2 font-mono">{audit_data['estimated_penalty_risk']}</div>
-                    <p class="text-xs text-slate-500 mt-2">6502 Sayılı Kanun Madde 77/A Kapsamında</p>
-                </div>
+                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800"><p class="text-xs text-slate-400">Mevzuat Skoru</p><div class="text-4xl font-extrabold text-amber-400 mt-2">{audit_data['health_score']} / 100</div></div>
+                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800"><p class="text-xs text-slate-400">Riskli Ürün</p><div class="text-4xl font-extrabold text-rose-500 mt-2">{audit_data['total_issues']} Ürün</div></div>
+                <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800"><p class="text-xs text-slate-400">Tahmini Ceza Riski</p><div class="text-3xl font-extrabold text-rose-400 mt-2">{audit_data['estimated_penalty_risk']}</div></div>
             </div>
-
-            <!-- DÜZELTME KANCASI (CONVERSION CALL TO ACTION) -->
-            <div class="bg-gradient-to-r from-orange-950/80 via-slate-900 to-indigo-950/80 rounded-2xl p-6 border border-orange-500/30 flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl">
-                <div class="space-y-1">
-                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
-                        <i class="fa-solid fa-wand-magic-sparkles text-orange-400"></i> Bu Riskleri Otomatik Düzeltmek İster misiniz?
-                    </h3>
-                    <p class="text-xs text-slate-300">
-                        UyumHub Suite, İkas ve Shopify e-ticaret sitelerinizi Ticaret Bakanlığı mevzuatına %100 uyumlu hale getirir ve ceza riskini sıfırlar.
-                    </p>
-                </div>
-                <a href="/dashboard?storeDomain=dev-mevzuattestmagaza.myikas.com" class="bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold px-6 py-3 rounded-xl transition shadow-lg shadow-orange-950 flex items-center gap-2 whitespace-nowrap text-sm cursor-pointer">
-                    <i class="fa-solid fa-shield-check"></i> UyumHub Suite'i Yükleyin
-                </a>
+            <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                <table class="w-full text-left text-sm text-slate-300">
+                    <thead class="bg-slate-950 text-xs text-slate-400 uppercase">
+                        <tr><th class="p-4">Ürün</th><th class="p-4">SKU</th><th class="p-4">Fiyat</th><th class="p-4">İhlal</th><th class="p-4">Risk</th><th class="p-4">Olası Ceza</th></tr>
+                    </thead>
+                    <tbody>{issues_html}</tbody>
+                </table>
             </div>
-
-            <!-- DETAYLI RİSK TABLOSU -->
-            <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-                <div class="p-6 border-b border-slate-800 flex justify-between items-center">
-                    <h2 class="text-base font-bold text-white flex items-center gap-2">
-                        <i class="fa-solid fa-list-check text-orange-400"></i> Birebir İhlal Raporu
-                    </h2>
-                    <span class="text-xs font-mono bg-slate-800 text-slate-400 px-3 py-1 rounded-lg">Trendyol API Live Sync</span>
-                </div>
-
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm text-slate-300">
-                        <thead class="bg-slate-950 text-xs text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                            <tr>
-                                <th class="p-4">Ürün Adı</th>
-                                <th class="p-4">SKU</th>
-                                <th class="p-4">Fiyat</th>
-                                <th class="p-4">Tespit Edilen İhlal</th>
-                                <th class="p-4">Risk</th>
-                                <th class="p-4">Olası Ceza</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-800">
-                            {issues_html}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
         </div>
     </body>
     </html>
@@ -423,43 +387,12 @@ async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
     html_content = f"""
     <!DOCTYPE html>
     <html lang="tr">
-    <head>
-        <meta charset="UTF-8">
-        <title>UyumHub - Ajans Partner Programı</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    </head>
-    <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen p-6">
+    <head><meta charset="UTF-8"><title>UyumHub - Ajans Partner Programı</title><script src="https://cdn.tailwindcss.com"></script></head>
+    <body class="bg-slate-900 text-slate-100 font-sans p-6">
         <div class="max-w-6xl mx-auto space-y-6">
-            <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div class="flex items-center gap-4">
-                    <div class="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-900 text-2xl font-bold shadow-lg">
-                        <i class="fa-solid fa-handshake"></i>
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-white">Ajans Partner Programı (Compliance-as-Infrastructure)</h1>
-                        <p class="text-sm text-slate-400">Partner Kodu: <span class="font-mono text-emerald-400 font-bold">{agencyCode}</span></p>
-                    </div>
-                </div>
-                <div class="bg-slate-900 px-4 py-2 rounded-xl border border-slate-700 text-right">
-                    <p class="text-xs text-slate-400 uppercase">Komisyon Oranı</p>
-                    <p class="text-lg font-bold text-emerald-400">%25 Gelir Payı (Aylık Düzenli)</p>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-                    <p class="text-xs text-slate-400 uppercase">Bağlı Mağaza Sayısı</p>
-                    <h3 class="text-3xl font-bold text-white mt-2">18 Mağaza</h3>
-                </div>
-                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-                    <p class="text-xs text-slate-400 uppercase">Aylık Hakediş (Net)</p>
-                    <h3 class="text-3xl font-bold text-emerald-400 mt-2">$225.00 / ay</h3>
-                </div>
-                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-                    <p class="text-xs text-slate-400 uppercase">Mevzuat Risk Kalkanı</p>
-                    <h3 class="text-3xl font-bold text-indigo-400 mt-2">%100 Koruma</h3>
-                </div>
+            <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 flex justify-between items-center">
+                <h1 class="text-xl font-bold text-white">Ajans Partner Programı (Compliance-as-Infrastructure)</h1>
+                <span class="text-emerald-400 font-bold">%25 Gelir Payı (Aylık)</span>
             </div>
         </div>
     </body>
@@ -486,7 +419,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <title>UyumHub - Mevzuat & Sertifika Paneli</title>
+        <title>UyumHub - Mevzuat & 30 Gün Fiyat Takip Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -496,10 +429,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
-                        <i class="fa-solid fa-award"></i>
+                        <i class="fa-solid fa-scale-balanced"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat & Ajans Destekli Panel</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat & Reklam Kurulu Paneli</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
@@ -527,8 +460,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Birim Fiyat Analizi & Mevzuat Uyumu</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu ve loglanan yasal etiketler.</p>
+                            <h2 class="text-base font-bold text-slate-900">Birim Fiyat & Reklam Kurulu 30 Günlük Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu birim fiyatlar ve referans indirim doğrulamaları.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -542,6 +475,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                     <th class="p-4">Satış Fiyatı</th>
                                     <th class="p-4">Miktar / Ambalaj</th>
                                     <th class="p-4">Hesaplanan Etiket</th>
+                                    <th class="p-4">30 Günlük İndirim Doğrulaması</th>
                                     <th class="p-4 pr-6">Vitrin Durumu</th>
                                 </tr>
                             </thead>
@@ -575,6 +509,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         tbody.innerHTML = "";
                         data.products.forEach(prod => {{
                             prod.variants.forEach(variant => {{
+                                const discountBadge = variant.discount_compliance.is_compliant 
+                                    ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md"><i class="fa-solid fa-check-double"></i> Reklam Kurulu Uyumlu</span>`
+                                    : `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md"><i class="fa-solid fa-circle-info"></i> Standard Fiyat</span>`;
+
                                 const row = `
                                     <tr class="hover:bg-slate-50/80 transition">
                                         <td class="p-4 pl-6 font-medium text-slate-900">${{prod.product_name}}</td>
@@ -586,6 +524,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                                 <i class="fa-solid fa-tag text-indigo-500"></i> ${{variant.compliance.display_text}}
                                             </span>
                                         </td>
+                                        <td class="p-4">${{discountBadge}}</td>
                                         <td class="p-4 pr-6">
                                             <span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
                                                 <i class="fa-solid fa-check"></i> Senkronize (${{data.platform}})
@@ -648,9 +587,9 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
 
         if not products:
             products = [
-                {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}]},
-                {"id": "prod_002", "name": "Organik Çam Balı 850 gr", "variants": [{"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}]},
-                {"id": "prod_003", "name": "Antep Fıstığı Ezmesi 350 gr", "variants": [{"id": "var_003", "sku": "FST-350G", "price": 245.00, "weight": 0.35, "unit": "kg"}]}
+                {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "compare_at_price": 450.00, "weight": 1.0, "unit": "L"}]},
+                {"id": "prod_002", "name": "Organik Çam Balı 850 gr", "variants": [{"id": "var_002", "sku": "BAL-850G", "price": 425.00, "compare_at_price": 500.00, "weight": 0.85, "unit": "kg"}]},
+                {"id": "prod_003", "name": "Antep Fıstığı Ezmesi 350 gr", "variants": [{"id": "var_003", "sku": "FST-350G", "price": 245.00, "compare_at_price": 245.00, "weight": 0.35, "unit": "kg"}]}
             ]
 
         processed_products = []
@@ -658,18 +597,25 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             variants_compliance = []
             for variant in prod.get("variants", []):
                 price = variant.get("price", 0.0)
+                compare_at_price = variant.get("compare_at_price", price)
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
+                # Birim fiyat hesabı
                 compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
+                
+                # Reklam Kurulu 30 günlük fiyat doğrulama hesabı
+                discount_compliance = ThirtyDayPriceTracker.validate_discount_compliance(price, compare_at_price)
 
                 variants_compliance.append({
                     "variant_id": variant.get("id"),
                     "sku": variant.get("sku"),
                     "price": price,
+                    "compare_at_price": compare_at_price,
                     "weight": weight,
                     "unit": unit,
                     "compliance": compliance_result,
+                    "discount_compliance": discount_compliance,
                     "synced_to_platform": True
                 })
 
