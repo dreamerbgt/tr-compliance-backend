@@ -1,11 +1,13 @@
 import os
+import json
 import logging
+import urllib.request
+import urllib.parse
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
-import requests
 
 # Logging Yapılandırması
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +20,7 @@ IKAS_CLIENT_ID = os.getenv("IKAS_CLIENT_ID", "")
 IKAS_CLIENT_SECRET = os.getenv("IKAS_CLIENT_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://tr-compliance-backend.onrender.com")
 
-# Supabase İstemcisi Başlatma
+# Supabase İstemcisi Güvenli Başlatma
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
@@ -122,7 +124,7 @@ async def ikas_launch(request: Request):
             }
         )
 
-    # OAuth Yetkilendirme Yönlendirmesi (state={domain} eklenerek mağaza bilgisi korunur)
+    # State parametresi üzerinden mağaza domain bilgisi taşınır
     redirect_uri = f"{APP_BASE_URL}/api/v1/ikas/callback"
     authorize_url = (
         f"https://{domain}/admin/oauth/authorize"
@@ -135,14 +137,13 @@ async def ikas_launch(request: Request):
     return RedirectResponse(url=authorize_url)
 
 
-# İKAS CALLBACK ENDPOINT (Token Exchange & Supabase Save)
+# İKAS CALLBACK ENDPOINT (Standart urllib ile Bağımlılıksız Token Exchange)
 @app.get("/api/v1/ikas/callback")
 async def ikas_callback(request: Request):
     params = request.query_params
     logger.info(f"Callback çağrıldı. Parametreler: {dict(params)}")
     
     code = params.get("code")
-    # Domain bilgisini ilk olarak 'state' parametresinden, yoksa alternatiflerden alıyoruz
     domain = params.get("state") or params.get("storeDomain") or params.get("store_domain") or params.get("shop") or params.get("domain") or params.get("merchantId")
 
     if not code:
@@ -154,34 +155,40 @@ async def ikas_callback(request: Request):
     access_token = None
     token_error = None
 
-    # İkas OAuth Token Exchange İşlemi
+    # Python Dahili urllib.request ile Token İsteği
     if IKAS_CLIENT_ID and IKAS_CLIENT_SECRET and domain:
         try:
             token_url = f"https://{domain}/admin/oauth/token"
-            payload = {
+            payload = json.dumps({
                 "grant_type": "authorization_code",
                 "client_id": IKAS_CLIENT_ID,
                 "client_secret": IKAS_CLIENT_SECRET,
                 "code": code,
                 "redirect_uri": f"{APP_BASE_URL}/api/v1/ikas/callback"
-            }
-            
-            response = requests.post(token_url, json=payload, timeout=10)
-            if response.status_code == 200:
-                token_data = response.json()
-                access_token = token_data.get("access_token")
-                logger.info(f"İkas Access Token başarıyla alındı: {domain}")
-            else:
-                token_error = f"HTTP {response.status_code}: {response.text}"
-                logger.warning(f"Token alınamadı, fallback token kullanılıyor. Detay: {token_error}")
-                access_token = f"ikas_token_{code[:12]}"
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                token_url,
+                data=payload,
+                headers={"Content-Type": "application/json"}
+            )
+
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    res_body = json.loads(response.read().decode("utf-8"))
+                    access_token = res_body.get("access_token")
+                    logger.info(f"İkas Access Token başarıyla alındı: {domain}")
+                else:
+                    token_error = f"HTTP status: {response.status}"
+                    access_token = f"ikas_token_{code[:12]}"
         except Exception as e:
-            logger.error(f"Token isteği sırasında hata: {str(e)}")
+            logger.error(f"Token alma hatası (urllib): {str(e)}")
+            token_error = str(e)
             access_token = f"ikas_token_{code[:12]}"
     else:
         access_token = f"ikas_token_{code[:12]}"
 
-    # Supabase 'merchants' Tablosuna Kayıt
+    # Supabase Kaydı
     if supabase_client and domain:
         try:
             merchant_data = {
