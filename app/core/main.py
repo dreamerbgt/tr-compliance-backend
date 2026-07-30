@@ -107,9 +107,6 @@ def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
 
 
 def fetch_ikas_token(domain: str, code: str) -> tuple[Optional[str], Optional[str]]:
-    """
-    İkas OAuth Token API Endpoint'leri üzerinden Access Token alımı.
-    """
     candidate_urls = [
         "https://api.myikas.com/api/admin/oauth/token",
         f"https://{domain}/api/admin/oauth/token"
@@ -140,7 +137,6 @@ def fetch_ikas_token(domain: str, code: str) -> tuple[Optional[str], Optional[st
                     res_body = json.loads(response.read().decode("utf-8"))
                     return res_body.get("access_token"), None
         except urllib.error.HTTPError as e_http:
-            # Yedek deneme: application/json
             try:
                 headers_json = {**headers, "Content-Type": "application/json"}
                 payload_json = json.dumps(payload_dict).encode("utf-8")
@@ -176,22 +172,8 @@ async def ikas_launch(request: Request):
 
     if not domain:
         return JSONResponse(
-            status_code=200,
-            content={
-                "status": "warning",
-                "message": "Mağaza bilgisi bulunamadı. Lütfen uygulamayı İkas Mağaza Paneli içerisinden başlatın.",
-                "debug_received_params": params
-            }
-        )
-
-    if not IKAS_CLIENT_ID:
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "info",
-                "storeDomain": domain,
-                "message": "UyumHub hazır. IKAS_CLIENT_ID bekleniyor."
-            }
+            status_code=400,
+            content={"status": "error", "message": "Mağaza bilgisi bulunamadı."}
         )
 
     redirect_uri = f"{APP_BASE_URL}/api/v1/ikas/callback"
@@ -206,7 +188,7 @@ async def ikas_launch(request: Request):
     return RedirectResponse(url=authorize_url)
 
 
-# İKAS CALLBACK ENDPOINT
+# İKAS CALLBACK ENDPOINT (Doğrudan Mağaza Admin Paneline Yönlendirmeli)
 @app.get("/api/v1/ikas/callback")
 async def ikas_callback(request: Request):
     params = dict(request.query_params)
@@ -225,13 +207,13 @@ async def ikas_callback(request: Request):
     
     domain = normalize_domain(raw_domain)
 
-    if not code:
+    if not code or not domain:
         return JSONResponse(
             status_code=400,
-            content={"status": "error", "message": "Yetkilendirme kodu (code) bulunamadı.", "debug_received_params": params}
+            content={"status": "error", "message": "Yetkilendirme parametreleri eksik."}
         )
 
-    access_token, token_error = fetch_ikas_token(domain, code) if (IKAS_CLIENT_ID and IKAS_CLIENT_SECRET and domain) else (None, "Credentials or domain missing")
+    access_token, token_error = fetch_ikas_token(domain, code) if (IKAS_CLIENT_ID and IKAS_CLIENT_SECRET) else (None, "Credentials missing")
 
     if not access_token:
         access_token = f"ikas_token_{code[:12]}"
@@ -250,15 +232,9 @@ async def ikas_callback(request: Request):
         except Exception as e:
             logger.error(f"Supabase kayıt hatası: {str(e)}")
 
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "success",
-            "message": "✅ TR Mevzuat & Uyum Paketi Mağazanıza Başarıyla Bağlandı!",
-            "store": domain,
-            "token_status": "authenticated" if not token_error else f"linked ({token_error})"
-        }
-    )
+    # MAĞAZA SAHİBİNİ DOĞRUDAN İKAS ADMİN PANELİNE GERİ YÖNLENDİRİYORUZ
+    admin_redirect_url = f"https://{domain}/admin"
+    return RedirectResponse(url=admin_redirect_url)
 
 
 # MEVZUAT API ENDPOINT'LERİ
