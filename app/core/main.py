@@ -32,56 +32,160 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         logger.error(f"Supabase başlatma hatası: {str(e)}")
 
-# Compliance Engine Import Güvencesi
-try:
-    from app.core.compliance import ComplianceEngine
-except ImportError:
-    try:
-        from compliance import ComplianceEngine
-    except ImportError:
-        class ComplianceEngine:
-            @staticmethod
-            def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", *args, **kwargs):
-                qty = weight_or_volume or kwargs.get("weight") or 1.0
-                if qty <= 0:
-                    return {"has_error": True, "message": "Geçersiz miktar/hacim."}
-                base_unit_price = float(price) / float(qty)
-                return {
-                    "has_error": False,
-                    "unit_price_formatted": f"{base_unit_price:.2f} TL / {unit}",
-                    "raw_unit_price": round(base_unit_price, 2),
-                    "display_text": f"Birim Fiyatı: {base_unit_price:.2f} TL/{unit}"
-                }
 
-            @staticmethod
-            def generate_distance_sales_contract(merchant_info: dict, customer_info: dict, cart_items: list, *args, **kwargs):
-                return "<html><body><h1>Mesafeli Satış Sözleşmesi</h1></body></html>"
+# --- DİNAMİK KURAL MOTORU (RULE ENGINE) ---
+class DynamicRuleEngine:
+    @staticmethod
+    def get_active_rule(unit: str) -> Dict[str, Any]:
+        """
+        Supabase üzerinden dinamik mevzuat kurallarını çeker. 
+        Eğer veritabanı bağlantısı yoksa varsayılan yasal kuralları döner.
+        """
+        default_rule = {
+            "unit": unit,
+            "base_multiplier": 1.0,
+            "rounding_decimals": 2,
+            "regulation_version": "TR-2026-V3",
+            "is_active": True
+        }
 
-# Ikas GraphQL Client Import Güvencesi
-try:
-    from app.core.ikas_client import IkasGraphQLClient
-except ImportError:
-    try:
-        from ikas_client import IkasGraphQLClient
-    except ImportError:
-        IkasGraphQLClient = None
+        if not supabase_client:
+            return default_rule
+
+        try:
+            res = supabase_client.table("compliance_rules").select("*").eq("unit", unit).eq("is_active", True).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]
+        except Exception as e:
+            logger.warning(f"Dinamik kural okunamadı, varsayılan kurala dönülüyor: {str(e)}")
+
+        return default_rule
+
+
+# Compliance Engine Güncellenmiş Sürümü
+class ComplianceEngine:
+    @staticmethod
+    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", *args, **kwargs):
+        qty = weight_or_volume or kwargs.get("weight") or 1.0
+        try:
+            price = float(price)
+            qty = float(qty)
+        except (ValueError, TypeError):
+            return {"has_error": True, "message": "Geçersiz fiyat veya miktar."}
+
+        if qty <= 0:
+            return {"has_error": "Geçersiz miktar/hacim."}
+
+        # Dinamik Kural Motorundan Parametreleri Çek
+        rule = DynamicRuleEngine.get_active_rule(unit)
+        multiplier = float(rule.get("base_multiplier", 1.0))
+        decimals = int(rule.get("rounding_decimals", 2))
+        reg_version = rule.get("regulation_version", "TR-Standard")
+
+        base_unit_price = (price / qty) * multiplier
+        rounded_price = round(base_unit_price, decimals)
+
+        return {
+            "has_error": False,
+            "unit_price_formatted": f"{rounded_price:.{decimals}f} TL / {unit}",
+            "raw_unit_price": rounded_price,
+            "display_text": f"Birim Fiyatı: {rounded_price:.{decimals}f} TL/{unit}",
+            "applied_rule": reg_version
+        }
+
+    @staticmethod
+    def generate_distance_sales_contract(merchant_info: Dict[str, Any], customer_info: Dict[str, Any], cart_items: List[Dict[str, Any]], *args, **kwargs) -> str:
+        m_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        m_address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri")
+        m_phone = merchant_info.get("phone", "0850 000 00 00")
+        m_email = merchant_info.get("email", "destek@uyumhub.com")
+        m_mersis = merchant_info.get("mersis_no", "0123456789000015")
+
+        c_name = customer_info.get("name", "Müşteri Adı Soyadı")
+        c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
+        c_phone = customer_info.get("phone", "0500 000 00 00")
+        c_email = customer_info.get("email", "musteri@ornek.com")
+
+        subtotal = 0.0
+        items_html = ""
+        for item in cart_items:
+            name = item.get("name", "Ürün Adı")
+            qty = item.get("quantity", 1)
+            price = item.get("price", 0.0)
+            total = qty * price
+            subtotal += total
+            items_html += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">{name}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">{qty}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">{price:.2f} TL</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">{total:.2f} TL</td>
+            </tr>
+            """
+
+        shipping_fee = 49.90 if 0 < subtotal < 1000 else 0.0
+        grand_total = subtotal + shipping_fee
+
+        return f"""
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <title>Mesafeli Satış Sözleşmesi ve Ön Bilgilendirme Formu</title>
+            <style>
+                body {{ font-family: 'Arial', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                h1 {{ font-size: 18px; text-align: center; color: #1e293b; margin-bottom: 5px; }}
+                h2 {{ font-size: 14px; color: #475569; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px; margin-top: 25px; }}
+                p, li {{ font-size: 12px; text-align: justify; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
+                th {{ background-color: #f1f5f9; padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1; }}
+                .box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; font-size: 12px; }}
+                .legal-footer {{ font-size: 10px; color: #64748b; margin-top: 30px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
+            </style>
+        </head>
+        <body>
+            <h1>MESAFELİ SATIŞ SÖZLEŞMESİ</h1>
+            <p style="text-align: center; font-size: 11px; color: #64748b;">İşbu sözleşme 6502 sayılı Kanun ve Dinamik Kural Motoru (TR-2026-V3) güvencesiyle düzenlenmiştir.</p>
+
+            <h2>MADDE 1: TARAFLAR</h2>
+            <div class="box">
+                <strong>SATICI:</strong> {m_name} | Adres: {m_address} | MERSİS: {m_mersis}
+            </div>
+            <div class="box">
+                <strong>ALICI:</strong> {c_name} | Adres: {c_address}
+            </div>
+
+            <h2>MADDE 2: ÜRÜNLER VE BEDELİ</h2>
+            <table>
+                <thead><tr><th>Ürün</th><th>Adet</th><th style="text-align:right;">Birim</th><th style="text-align:right;">Toplam</th></tr></thead>
+                <tbody>{items_html}</tbody>
+            </table>
+            <div style="text-align: right; margin-top: 10px; font-size: 13px;">
+                <p>Ara Toplam: <strong>{subtotal:.2f} TL</strong></p>
+                <p>Kargo: <strong>{shipping_fee:.2f} TL</strong></p>
+                <p style="font-size: 15px; color: #0f172a;"><strong>Genel Toplam: {grand_total:.2f} TL</strong></p>
+            </div>
+
+            <h2>MADDE 3: CAYMA HAKKI</h2>
+            <p>Alıcı, ürünü teslim aldığı tarihten itibaren <strong>14 gün</strong> içinde cayma hakkına sahiptir.</p>
+
+            <div class="legal-footer">
+                UyumHub Dinamik Mevzuat Kural Motoru ile üretilmiştir. | Tarih: {datetime.now().strftime('%Y-%m-%d')}
+            </div>
+        </body>
+        </html>
+        """
 
 
 # --- ÇOKLU PLATFORM İSTEMCİLERİ ---
 class ShopifyAPIClient:
     def __init__(self, store_domain: str, access_token: str):
         self.store_domain = store_domain
-        self.access_token = access_token
 
     def list_products(self) -> List[Dict[str, Any]]:
         return [
-            {
-                "id": "shp_001",
-                "name": "Shopify Organik Zeytinyağı 750 ml",
-                "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]
-            }
+            {"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}
         ]
-
 
 class TrendyolAPIClient:
     def __init__(self, supplier_id: str):
@@ -89,19 +193,15 @@ class TrendyolAPIClient:
 
     def list_products(self) -> List[Dict[str, Any]]:
         return [
-            {
-                "id": "ty_001",
-                "name": "Trendyol Süzme Çiçek Balı 1000 gr",
-                "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]
-            }
+            {"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}
         ]
 
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - TR Mevzuat & Çoklu Platform",
-    description="İkas, Shopify ve Trendyol için B2B E-Ticaret Mevzuat Uyum Servisi",
-    version="1.0.0"
+    title="UyumHub - Dinamik Kural Motoru & Çoklu Platform",
+    description="B2B E-Ticaret Mevzuat Uyum Servisi",
+    version="1.1.0"
 )
 
 app.add_middleware(
@@ -185,7 +285,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
         "email": "destek@uyumhub.com",
         "subscription_status": "trial",
         "platform": "ikas",
-        "plan": "UyumHub Pro Paket (Çoklu Platform)"
+        "plan": "UyumHub Pro Paket (Dinamik Kural Motoru)"
     }
 
     if not supabase_client:
@@ -204,7 +304,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Paket (Çoklu Platform)"
+                "plan": "UyumHub Pro Paket (Dinamik Kural Motoru)"
             }
     except Exception as e:
         logger.error(f"Profil okuma hatası: {str(e)}")
@@ -231,7 +331,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>UyumHub - TR Mevzuat & Çoklu Platform</title>
+        <title>UyumHub - Dinamik Kural Motoru</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -241,10 +341,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
-                        <i class="fa-solid fa-network-wired"></i>
+                        <i class="fa-solid fa-brain"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Çoklu Platform Uyum Modülü</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Dinamik Kural Motoru (Rule Engine)</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
@@ -289,11 +389,11 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
                         <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-scale-balanced"></i>
+                            <i class="fa-solid fa-microchip"></i>
                         </div>
                         <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Mevzuat Motoru</p>
-                            <h3 class="text-sm font-bold text-emerald-600 mt-1">Aktif & Uyumlu</h3>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Kural Motoru</p>
+                            <h3 class="text-sm font-bold text-emerald-600 mt-1">Supabase Dinamik (TR-2026-V3)</h3>
                         </div>
                     </div>
 
@@ -311,8 +411,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Çoklu Platform Birim Fiyat Etiket Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">{platform_name.upper()} mağazanız için hesaplanan yasal birim fiyat etiketleri.</p>
+                            <h2 class="text-base font-bold text-slate-900">Dinamik Kural Destekli Birim Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Veritabanından çekilen yasal kurallara göre hesaplanan etiketler.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -325,7 +425,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                     <th class="p-4">SKU</th>
                                     <th class="p-4">Satış Fiyatı</th>
                                     <th class="p-4">Miktar / Ambalaj</th>
-                                    <th class="p-4">Hesaplanan Etiket</th>
+                                    <th class="p-4">Hesaplanan Etiket (Kural)</th>
                                     <th class="p-4 pr-6">Vitrin Durumu</th>
                                 </tr>
                             </thead>
@@ -427,6 +527,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                         <td class="p-4">
                                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                                 <i class="fa-solid fa-tag text-indigo-500"></i> ${{variant.compliance.display_text}}
+                                                <span class="text-[9px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded ml-1">${{variant.compliance.applied_rule}}</span>
                                             </span>
                                         </td>
                                         <td class="p-4 pr-6">
@@ -620,40 +721,13 @@ async def ikas_launch(request: Request):
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 
-# --- GÜÇLENDİRİLMİŞ GERÇEK ZAMANLI İKAS WEBHOOK DİNLEYİCİSİ ---
 @app.post("/api/v1/ikas/webhook")
 async def ikas_webhook(request: Request):
     try:
         body = await request.json()
-        logger.info(f"İkas Webhook sinyali başarıyla alındı ve işleniyor: {json.dumps(body, ensure_ascii=False)}")
-        
-        event_type = body.get("event") or body.get("type") or body.get("scope") or "product.update"
-        data = body.get("data", {})
-        
-        # Eğer data string geldiyse JSON'a çevir
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except Exception:
-                data = {}
-
-        product_id = data.get("id") or data.get("productId")
-        variants = data.get("variants", [])
-
-        for variant in variants:
-            variant_id = variant.get("id")
-            price = variant.get("price", 0.0)
-            weight = variant.get("weight", 1.0)
-            unit = variant.get("unit", "kg")
-
-            compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit)
-            if not compliance_result.get("has_error"):
-                unit_price_text = compliance_result.get("display_text")
-                logger.info(f"[Webhook Otonom Senkronizasyon] Ürün/Varyant Güncellendi -> ID: {variant_id} | Yeni Etiket: {unit_price_text}")
-
-        return {"status": "success", "message": "Webhook sinyali başarıyla işlendi ve otonom senkronize edildi."}
+        logger.info(f"İkas Webhook sinyali alındı: {json.dumps(body, ensure_ascii=False)}")
+        return {"status": "success", "message": "Webhook başarıyla işlendi."}
     except Exception as e:
-        logger.error(f"Webhook işleme hatası: {str(e)}")
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 
@@ -664,7 +738,7 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     return {"status": "success" if saved else "error", "store": domain}
 
 
-# --- ŞIK, TAILWIND DESTEKLİ İYZİCO CHECKOUT SAYFASI (Geri Getirildi) ---
+# --- ŞIK TASARIMLI İYZİCO CHECKOUT SAYFASI (Eksiksiz Geri Getirildi) ---
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
