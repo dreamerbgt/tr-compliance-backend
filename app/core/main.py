@@ -75,7 +75,7 @@ class DynamicRuleEngine:
         return default_rule
 
 
-# --- MODÜL 11: REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
+# --- REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
 class ThirtyDayPriceTracker:
     @staticmethod
     def validate_discount_compliance(current_price: float, compare_at_price: float, price_history: Optional[List[float]] = None) -> Dict[str, Any]:
@@ -101,7 +101,7 @@ class ThirtyDayPriceTracker:
         }
 
 
-# --- MODÜL 12: KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
+# --- KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
 class KVKKEngine:
     @staticmethod
     def generate_kvkk_notice(merchant_info: Dict[str, Any], store_domain: str) -> str:
@@ -220,41 +220,17 @@ class ComplianceEngine:
             <div class="certificate-container">
                 <div class="inner-border">
                     <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK, Shopify OS 2.0 Standartları ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
+                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
                     <div class="company-name">{company_name}</div>
                     <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
                     <div class="details-box">
                         <div><strong>Tarih:</strong> {issue_date}</div>
                         <div><strong>Kural Motoru:</strong> TR-2026-V3</div>
-                        <div><strong>Shopify App Block:</strong> ONAYLI</div>
+                        <div><strong>Durum:</strong> ONAYLI</div>
                     </div>
                     <div class="seal">Kriptografik Mühür: {cert_hash}</div>
                 </div>
             </div>
-        </body>
-        </html>
-        """
-
-    @staticmethod
-    def generate_distance_sales_contract(merchant_info: Dict[str, Any], customer_info: Dict[str, Any], cart_items: List[Dict[str, Any]], *args, **kwargs) -> str:
-        m_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
-        m_mersis = merchant_info.get("mersis_no", "0123456789000015")
-        c_name = customer_info.get("name", "Müşteri Adı Soyadı")
-        c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
-
-        subtotal = sum(item.get("quantity", 1) * item.get("price", 0.0) for item in cart_items)
-        shipping_fee = 49.90 if 0 < subtotal < 1000 else 0.0
-        grand_total = subtotal + shipping_fee
-
-        return f"""
-        <!DOCTYPE html>
-        <html lang="tr">
-        <head><meta charset="UTF-8"><title>Mesafeli Satış Sözleşmesi</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>MESAFELİ SATIŞ SÖZLEŞMESİ</h2>
-            <p><strong>Satıcı:</strong> {m_name} (MERSİS: {m_mersis})</p>
-            <p><strong>Alıcı:</strong> {c_name} ({c_address})</p>
-            <p><strong>Toplam Tutar:</strong> {grand_total:.2f} TL</p>
         </body>
         </html>
         """
@@ -279,21 +255,11 @@ class TrendyolAuditEngine:
         }
 
 
-# --- ÇOKLU PLATFORM İSTEMCİLERİ ---
-class ShopifyAPIClient:
-    def __init__(self, store_domain: str, access_token: str): self.store_domain = store_domain
-    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "compare_at_price": 380.00, "weight": 0.75, "unit": "L"}]}]
-
-class TrendyolAPIClient:
-    def __init__(self, supplier_id: str): self.supplier_id = supplier_id
-    def list_products(self) -> List[Dict[str, Any]]: return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "compare_at_price": 500.00, "weight": 1.0, "unit": "kg"}]}]
-
-
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Shopify OS 2.0 & Mevzuat Platformu",
+    title="UyumHub - Mevzuat & E-Ticaret Platformu",
     description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
-    version="1.8.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -340,7 +306,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     default_profile = {
         "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
         "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub OS 2.0 Full Suite"
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Full Mevzuat Paket"
     }
     if not supabase_client: return default_profile
     try:
@@ -356,51 +322,58 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub OS 2.0 Full Suite"
+                "plan": "UyumHub Full Mevzuat Paket"
             }
     except Exception: pass
     return default_profile
 
 
-# --- MODÜL 13: SHOPIFY OS 2.0 STOREFRONT BADGE ENDPOINT ---
-@app.get("/api/v1/shopify/storefront/compliance-badge")
-async def get_shopify_storefront_badge(price: float, weight: float = 1.0, unit: str = "kg", storeDomain: str = "organikgurme.myshopify.com"):
+# --- 1. MAĞAZA GİRİŞ / SEÇİM EKRANI (/login) ---
+@app.get("/login", response_class=HTMLResponse)
+async def render_login_page():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub - Mağaza Girişi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 p-8 space-y-6">
+            <div class="text-center space-y-2">
+                <div class="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-3xl font-bold mx-auto shadow-lg shadow-indigo-950">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <h1 class="text-2xl font-bold text-white">UyumHub Mağaza Paneli</h1>
+                <p class="text-xs text-slate-400">Yönetmek istediğiniz e-ticaret mağaza domain adını girin.</p>
+            </div>
+
+            <form action="/dashboard" method="GET" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase mb-2">Mağaza Domain Adı</label>
+                    <div class="relative">
+                        <input type="text" name="storeDomain" required placeholder="ornek.myikas.com veya myshopify.com" 
+                               class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-950 flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-right-to-bracket"></i> Mağaza Paneline Giriş Yap
+                </button>
+            </form>
+
+            <div class="text-center border-t border-slate-700/60 pt-4">
+                <p class="text-[11px] text-slate-500">Mevzuat Uyumluluk & Otomasyon Altyapısı © UyumHub</p>
+            </div>
+        </div>
+    </body>
+    </html>
     """
-    Shopify Theme App Extension (Liquid App Block) tarafından çağrılan storefront uç noktası.
-    Ürün sayfasında canlı birim fiyat rozetini HTML ve CSS olarak döndürür.
-    """
-    domain = normalize_domain(storeDomain)
-    calc_res = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
-    
-    badge_html = f"""
-    <div class="uyumhub-unit-price-badge" style="display: inline-flex; items-center: center; gap: 6px; background-color: #f1f5f9; border: 1px solid #cbd5e1; color: #0f172a; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; margin: 8px 0;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span>{calc_res.get('display_text', 'Birim Fiyat Hesaplandı')}</span>
-    </div>
-    """
-    return JSONResponse(content={
-        "status": "success",
-        "store": domain,
-        "formatted_text": calc_res.get("display_text"),
-        "badge_html": badge_html,
-        "applied_rule": calc_res.get("applied_rule")
-    })
+    return HTMLResponse(content=html_content)
 
 
-# --- TRENDYOL AUDIT UI ---
-@app.get("/audit/trendyol", response_class=HTMLResponse)
-async def render_trendyol_audit_page(supplierId: str = "123456"):
-    audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
-    return HTMLResponse(content=f"<h1>Trendyol Audit Supplier: {supplierId} - Risk: {audit_data['estimated_penalty_risk']}</h1>")
-
-
-# --- AJANS DASHBOARD UI ---
-@app.get("/agency/dashboard", response_class=HTMLResponse)
-async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
-    return HTMLResponse(content=f"<h1>UyumHub Ajans Dashboard - Partner: {agencyCode}</h1>")
-
-
-# --- ANA DASHBOARD UI ---
+# --- 2. ANA DASHBOARD UI (Sadece Mağaza Sahibi / Tüccar Görünümü) ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -418,40 +391,61 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <title>UyumHub - OS 2.0 & Full Mevzuat Suite</title>
+        <title>UyumHub - Mağaza Mevzuat Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
     <body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen p-6">
         <div class="max-w-6xl mx-auto space-y-6">
             
+            <!-- ÜST HEADER BAR -->
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
                         <i class="fa-solid fa-shield-halved"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat, KVKK & Shopify OS 2.0 Suite</h1>
-                        <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat & E-Ticaret Suite</h1>
+                        <p class="text-sm text-slate-500 flex items-center gap-2">
+                            Mağaza: <span class="font-semibold text-indigo-600">{domain}</span>
+                            <button onclick="openStoreSwitchModal()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-2 py-0.5 rounded border border-slate-300 transition">
+                                <i class="fa-solid fa-arrows-rotate text-[10px]"></i> Değiştir
+                            </button>
+                        </p>
                     </div>
                 </div>
+
+                <!-- NAVİGASYON BUTONLARI (Ajans Paneli Buradan Kaldırıldı) -->
                 <div class="flex items-center gap-2 flex-wrap">
                     {status_badge}
-                    <a href="/api/v1/compliance/kvkk?storeDomain={domain}" target="_blank" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">KVKK</a>
-                    <a href="/api/v1/compliance/cookie-policy?storeDomain={domain}" target="_blank" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Çerez</a>
-                    <a href="/audit/trendyol" class="bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Audit</a>
-                    <a href="/agency/dashboard" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-xl transition text-emerald-400">Ajans</a>
-                    <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">Sertifika</a>
-                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition cursor-pointer">Senkronize Et</button>
+                    <a href="/api/v1/compliance/kvkk?storeDomain={domain}" target="_blank" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">
+                        <i class="fa-solid fa-file-shield"></i> KVKK
+                    </a>
+                    <a href="/api/v1/compliance/cookie-policy?storeDomain={domain}" target="_blank" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">
+                        <i class="fa-solid fa-cookie-bite"></i> Çerez
+                    </a>
+                    <a href="/audit/trendyol" class="bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">
+                        <i class="fa-solid fa-store"></i> Audit
+                    </a>
+                    <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition">
+                        <i class="fa-solid fa-certificate"></i> Sertifika
+                    </a>
+                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition cursor-pointer">
+                        <i class="fa-solid fa-rotate"></i> Senkronize Et
+                    </button>
+                    <a href="/login" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1">
+                        <i class="fa-solid fa-right-from-bracket"></i> Çıkış / Girişe Dön
+                    </a>
                 </div>
             </div>
 
+            <!-- ÜRÜN BİRİM FİYAT TABLOSU -->
             <div id="section-products" class="space-y-6">
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Birim Fiyat & Shopify OS 2.0 App Block Entegrasyonu</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">İkas & Shopify OS 2.0 mağazalarında çalışan aktif uyum rozetleri.</p>
+                            <h2 class="text-base font-bold text-slate-900">Birim Fiyat & Reklam Kurulu Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu birim fiyat etiketleri.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -477,8 +471,27 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
         </div>
 
+        <!-- MAĞAZA DEĞİŞTİRME MODALI -->
+        <div id="switchStoreModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-base font-bold text-slate-900">Farklı Mağazaya Geçiş Yap</h3>
+                    <button onclick="closeStoreSwitchModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <form action="/dashboard" method="GET" class="space-y-3">
+                    <input type="text" name="storeDomain" required placeholder="yeni-magaza.myikas.com" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-indigo-500">
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-sm transition">
+                        Mağazaya Geç
+                    </button>
+                </form>
+            </div>
+        </div>
+
         <script>
             const storeDomain = "{domain}";
+
+            function openStoreSwitchModal() {{ document.getElementById('switchStoreModal').classList.remove('hidden'); }}
+            function closeStoreSwitchModal() {{ document.getElementById('switchStoreModal').classList.add('hidden'); }}
 
             async function loadProducts() {{
                 const tbody = document.getElementById("products-table-body");
@@ -505,7 +518,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                         </td>
                                         <td class="p-4 pr-6">
                                             <span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-                                                <i class="fa-solid fa-check"></i> OS 2.0 Senkronize
+                                                <i class="fa-solid fa-check"></i> Senkronize
                                             </span>
                                         </td>
                                     </tr>
@@ -520,6 +533,56 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             function runSync() {{ loadProducts(); }}
             window.onload = loadProducts;
         </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
+# --- 3. BAĞIMSIZ AJANS PARTNER DASHBOARD (Sadece Ajanslara Özel Gizli Bağlantı) ---
+@app.get("/agency/dashboard", response_class=HTMLResponse)
+async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub - Ajans Partner Gizli Paneli</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen p-6">
+        <div class="max-w-6xl mx-auto space-y-6">
+            <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center text-slate-900 text-2xl font-bold shadow-lg">
+                        <i class="fa-solid fa-handshake"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-white">Ajans Partner Programı (Özel Yönetici Paneli)</h1>
+                        <p class="text-sm text-slate-400">Partner Kodu: <span class="font-mono text-emerald-400 font-bold">{agencyCode}</span></p>
+                    </div>
+                </div>
+                <a href="/login" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition flex items-center gap-2">
+                    <i class="fa-solid fa-right-from-bracket"></i> Mağaza Girişine Dön
+                </a>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Bağlı Mağaza Sayısı</p>
+                    <h3 class="text-3xl font-bold text-white mt-2">18 Mağaza</h3>
+                </div>
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Aylık Hakediş (Net)</p>
+                    <h3 class="text-3xl font-bold text-emerald-400 mt-2">$225.00 / ay</h3>
+                </div>
+                <div class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+                    <p class="text-xs text-slate-400 uppercase">Gelir Payı Oranı</p>
+                    <h3 class="text-3xl font-bold text-indigo-400 mt-2">%25 Düzenli Komisyon</h3>
+                </div>
+            </div>
+        </div>
     </body>
     </html>
     """
@@ -578,17 +641,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(err)})
 
 
-@app.post("/api/v1/merchant/settings")
-async def update_merchant_settings(payload: MerchantSettingsRequest):
-    if supabase_client:
-        try:
-            update_data = {"company_name": payload.company_name, "tax_number": payload.tax_number, "mersis_no": payload.mersis_no, "address": payload.address, "phone": payload.phone, "email": payload.email}
-            supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
-            return {"status": "success"}
-        except Exception as e: return {"status": "error", "detail": str(e)}
-    return {"status": "success"}
-
-
 @app.get("/api/v1/compliance/certificate", response_class=HTMLResponse)
 async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -596,16 +648,16 @@ async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.m
     return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
 
 
-@app.get("/api/v1/ikas/callback")
-async def ikas_callback(request: Request):
-    params = dict(request.query_params)
-    domain = normalize_domain(params.get("state") or params.get("storeName") or params.get("shop"))
-    save_merchant_to_supabase(domain, "token_ikas_123", platform="ikas")
-    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+@app.get("/audit/trendyol", response_class=HTMLResponse)
+async def render_trendyol_audit_page(supplierId: str = "123456"):
+    audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
+    return HTMLResponse(content=f"<div style='font-family:sans-serif; padding:40px;'><h1>Trendyol Audit Supplier: {supplierId}</h1><p>Risk: {audit_data['estimated_penalty_risk']}</p><a href='/login'>Giriş Ekranına Dön</a></div>")
 
 
 @app.get("/")
-async def root(): return RedirectResponse(url="/dashboard")
+async def root(): 
+    return RedirectResponse(url="/login")
 
 @app.get("/health")
-async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
+async def health(): 
+    return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
