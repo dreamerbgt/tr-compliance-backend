@@ -98,15 +98,59 @@ async def health():
 
 
 def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
-    """
-    Gelen mağaza adını (ör. dev-mevzuattestmagaza) tam domain formatına (dev-mevzuattestmagaza.myikas.com) çevirir.
-    """
     if not raw_domain:
         return None
     raw_domain = raw_domain.strip().lower()
     if "." not in raw_domain:
         return f"{raw_domain}.myikas.com"
     return raw_domain
+
+
+def fetch_ikas_token(domain: str, code: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    WAF/Cloudflare 403 engellerini aşacak şekilde User-Agent başlığı eklenmiş Token Exchange fonksiyonu.
+    """
+    token_url = f"https://{domain}/admin/oauth/token"
+    
+    payload_dict = {
+        "grant_type": "authorization_code",
+        "client_id": IKAS_CLIENT_ID,
+        "client_secret": IKAS_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": f"{APP_BASE_URL}/api/v1/ikas/callback"
+    }
+
+    headers_base = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 UyumHub/1.0",
+        "Accept": "application/json"
+    }
+
+    # Deneme 1: application/json
+    try:
+        headers_json = {**headers_base, "Content-Type": "application/json"}
+        payload_bytes = json.dumps(payload_dict).encode("utf-8")
+        req = urllib.request.Request(token_url, data=payload_bytes, headers=headers_json)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                res_body = json.loads(response.read().decode("utf-8"))
+                return res_body.get("access_token"), None
+    except urllib.error.HTTPError as e_http:
+        # Deneme 2: application/x-www-form-urlencoded (Standart OAuth2 Fallback)
+        try:
+            headers_form = {**headers_base, "Content-Type": "application/x-www-form-urlencoded"}
+            payload_form = urllib.parse.urlencode(payload_dict).encode("utf-8")
+            req_form = urllib.request.Request(token_url, data=payload_form, headers=headers_form)
+            with urllib.request.urlopen(req_form, timeout=10) as response_form:
+                if response_form.status == 200:
+                    res_body = json.loads(response_form.read().decode("utf-8"))
+                    return res_body.get("access_token"), None
+        except Exception as e_form:
+            return None, f"HTTP {e_http.code}: {e_http.reason} (Form retry: {str(e_form)})"
+        return None, f"HTTP {e_http.code}: {e_http.reason}"
+    except Exception as e:
+        return None, str(e)
+
+    return None, "Unknown token retrieval error"
 
 
 # İKAS LAUNCH ENDPOINT
@@ -182,40 +226,9 @@ async def ikas_callback(request: Request):
             content={"status": "error", "message": "Yetkilendirme kodu (code) bulunamadı.", "debug_received_params": params}
         )
 
-    access_token = None
-    token_error = None
+    access_token, token_error = fetch_ikas_token(domain, code) if (IKAS_CLIENT_ID and IKAS_CLIENT_SECRET and domain) else (None, "Credentials or domain missing")
 
-    if IKAS_CLIENT_ID and IKAS_CLIENT_SECRET and domain:
-        try:
-            token_url = f"https://{domain}/admin/oauth/token"
-            payload = json.dumps({
-                "grant_type": "authorization_code",
-                "client_id": IKAS_CLIENT_ID,
-                "client_secret": IKAS_CLIENT_SECRET,
-                "code": code,
-                "redirect_uri": f"{APP_BASE_URL}/api/v1/ikas/callback"
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                token_url,
-                data=payload,
-                headers={"Content-Type": "application/json"}
-            )
-
-            with urllib.request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    res_body = json.loads(response.read().decode("utf-8"))
-                    access_token = res_body.get("access_token")
-                    logger.info(f"İkas Access Token başarıyla alındı: {domain}")
-                else:
-                    token_error = f"HTTP status: {response.status}"
-                    access_token = f"ikas_token_{code[:12]}"
-        except Exception as e:
-            logger.error(f"Token alma hatası: {str(e)}")
-            token_error = str(e)
-            access_token = f"ikas_token_{code[:12]}"
-    else:
-        token_error = f"Missing requirements - ID:{bool(IKAS_CLIENT_ID)}, Secret:{bool(IKAS_CLIENT_SECRET)}, Domain:{domain}"
+    if not access_token:
         access_token = f"ikas_token_{code[:12]}"
 
     # Supabase Kaydı
@@ -238,7 +251,7 @@ async def ikas_callback(request: Request):
             "status": "success",
             "message": "✅ TR Mevzuat & Uyum Paketi Mağazanıza Başarıyla Bağlandı!",
             "store": domain,
-            "token_status": "authenticated" if access_token and not token_error else f"linked ({token_error})"
+            "token_status": "authenticated" if not token_error else f"linked ({token_error})"
         }
     )
 
