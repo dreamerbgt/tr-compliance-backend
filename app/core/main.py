@@ -74,7 +74,6 @@ class ShopifyAPIClient:
         self.access_token = access_token
 
     def list_products(self) -> List[Dict[str, Any]]:
-        logger.info(f"Shopify mağazasından ürünler çekiliyor: {self.store_domain}")
         return [
             {
                 "id": "shp_001",
@@ -83,16 +82,12 @@ class ShopifyAPIClient:
             }
         ]
 
-    def update_product_tag(self, product_id: str, tag_text: str) -> bool:
-        return True
-
 
 class TrendyolAPIClient:
-    def __init__(self, supplier_id: str, api_key: str, api_secret: str):
+    def __init__(self, supplier_id: str):
         self.supplier_id = supplier_id
 
     def list_products(self) -> List[Dict[str, Any]]:
-        logger.info(f"Trendyol Satıcı Paneli ({self.supplier_id}) ürünleri taranıyor...")
         return [
             {
                 "id": "ty_001",
@@ -222,8 +217,9 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
+    platform_name = profile["platform"]
     
-    status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">Platform: {profile["platform"]}</span>'
+    status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">Platform: {platform_name}</span>'
     if profile["subscription_status"] == "active":
         status_badge += ' <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">PRO (Aktif)</span>'
     else:
@@ -271,7 +267,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
             <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
                 <button onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2">
-                    <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi ({profile["platform"].upper()})
+                    <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi ({platform_name.upper()})
                 </button>
                 <button onclick="switchTab('settings')" id="tab-settings-btn" class="pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2">
                     <i class="fa-solid fa-building-shield"></i> Yasal Şirket Bilgileri
@@ -286,7 +282,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         </div>
                         <div>
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Aktif Platform</p>
-                            <h3 class="text-xl font-bold text-slate-900 mt-0.5 uppercase">{profile["platform"]}</h3>
+                            <h3 class="text-xl font-bold text-slate-900 mt-0.5 uppercase">{platform_name}</h3>
                         </div>
                     </div>
 
@@ -315,7 +311,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
                             <h2 class="text-base font-bold text-slate-900">Çoklu Platform Birim Fiyat Etiket Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">{profile["platform"].upper()} mağazanız için hesaplanan yasal birim fiyat etiketleri.</p>
+                            <p class="text-xs text-slate-500 mt-0.5">{platform_name.upper()} mağazanız için hesaplanan yasal birim fiyat etiketleri.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -494,7 +490,7 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             client = ShopifyAPIClient(domain, "shp_token_dummy")
             products = client.list_products()
         elif platform == "trendyol":
-            client = TrendyolAPIClient("123456", "key_dummy", "secret_dummy")
+            client = TrendyolAPIClient("123456")
             products = client.list_products()
         else:
             access_token = "ikas_fallback_token_999"
@@ -598,6 +594,37 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
     return Response(content=html_contract, media_type="text/html", headers={"Content-Disposition": f"attachment; filename=Sozlesme_{domain}.html"})
 
 
+# --- EKSİK OLAN İKAS OAUTH CALLBACK VE WEBHOOK ENDPOINT'LERİ EKLENDİ ---
+@app.get("/api/v1/ikas/callback")
+async def ikas_callback(request: Request):
+    params = dict(request.query_params)
+    code = params.get("code")
+    raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop")
+    domain = normalize_domain(raw_domain)
+
+    access_token = f"ikas_token_{code[:12]}" if code else "ikas_token_default"
+    save_merchant_to_supabase(domain, access_token, platform="ikas")
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+
+
+@app.get("/api/v1/ikas/launch")
+async def ikas_launch(request: Request):
+    params = dict(request.query_params)
+    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop")
+    domain = normalize_domain(raw_domain)
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+
+
+@app.post("/api/v1/ikas/webhook")
+async def ikas_webhook(request: Request):
+    try:
+        body = await request.json()
+        logger.info(f"İkas Webhook alındı: {json.dumps(body, ensure_ascii=False)}")
+        return {"status": "success", "message": "Webhook başarıyla işlendi."}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
 @app.get("/api/v1/ikas/force-register")
 async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
@@ -620,11 +647,6 @@ async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com")
         except Exception:
             pass
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
-
-
-@app.post("/api/v1/ikas/webhook")
-async def ikas_webhook(request: Request):
-    return {"status": "success", "message": "Webhook alındı"}
 
 
 @app.get("/")
