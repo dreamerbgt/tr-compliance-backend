@@ -108,9 +108,12 @@ def normalize_domain(raw_domain: Optional[str]) -> Optional[str]:
 
 def fetch_ikas_token(domain: str, code: str) -> tuple[Optional[str], Optional[str]]:
     """
-    WAF/Cloudflare 403 engellerini aşacak şekilde User-Agent başlığı eklenmiş Token Exchange fonksiyonu.
+    İkas OAuth Token API Endpoint'leri üzerinden Access Token alımı.
     """
-    token_url = f"https://{domain}/admin/oauth/token"
+    candidate_urls = [
+        "https://api.myikas.com/api/admin/oauth/token",
+        f"https://{domain}/api/admin/oauth/token"
+    ]
     
     payload_dict = {
         "grant_type": "authorization_code",
@@ -120,37 +123,39 @@ def fetch_ikas_token(domain: str, code: str) -> tuple[Optional[str], Optional[st
         "redirect_uri": f"{APP_BASE_URL}/api/v1/ikas/callback"
     }
 
-    headers_base = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 UyumHub/1.0",
-        "Accept": "application/json"
-    }
+    last_error = None
 
-    # Deneme 1: application/json
-    try:
-        headers_json = {**headers_base, "Content-Type": "application/json"}
-        payload_bytes = json.dumps(payload_dict).encode("utf-8")
-        req = urllib.request.Request(token_url, data=payload_bytes, headers=headers_json)
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status == 200:
-                res_body = json.loads(response.read().decode("utf-8"))
-                return res_body.get("access_token"), None
-    except urllib.error.HTTPError as e_http:
-        # Deneme 2: application/x-www-form-urlencoded (Standart OAuth2 Fallback)
+    for token_url in candidate_urls:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) UyumHub/1.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"
+        }
+        
         try:
-            headers_form = {**headers_base, "Content-Type": "application/x-www-form-urlencoded"}
-            payload_form = urllib.parse.urlencode(payload_dict).encode("utf-8")
-            req_form = urllib.request.Request(token_url, data=payload_form, headers=headers_form)
-            with urllib.request.urlopen(req_form, timeout=10) as response_form:
-                if response_form.status == 200:
-                    res_body = json.loads(response_form.read().decode("utf-8"))
+            payload_data = urllib.parse.urlencode(payload_dict).encode("utf-8")
+            req = urllib.request.Request(token_url, data=payload_data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    res_body = json.loads(response.read().decode("utf-8"))
                     return res_body.get("access_token"), None
-        except Exception as e_form:
-            return None, f"HTTP {e_http.code}: {e_http.reason} (Form retry: {str(e_form)})"
-        return None, f"HTTP {e_http.code}: {e_http.reason}"
-    except Exception as e:
-        return None, str(e)
+        except urllib.error.HTTPError as e_http:
+            # Yedek deneme: application/json
+            try:
+                headers_json = {**headers, "Content-Type": "application/json"}
+                payload_json = json.dumps(payload_dict).encode("utf-8")
+                req_json = urllib.request.Request(token_url, data=payload_json, headers=headers_json, method="POST")
+                with urllib.request.urlopen(req_json, timeout=10) as resp_json:
+                    if resp_json.status == 200:
+                        res_body = json.loads(resp_json.read().decode("utf-8"))
+                        return res_body.get("access_token"), None
+            except Exception:
+                pass
+            last_error = f"HTTP {e_http.code} on {token_url}: {e_http.reason}"
+        except Exception as e:
+            last_error = f"Error on {token_url}: {str(e)}"
 
-    return None, "Unknown token retrieval error"
+    return None, last_error
 
 
 # İKAS LAUNCH ENDPOINT
