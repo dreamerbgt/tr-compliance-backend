@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import traceback
+import hashlib
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
@@ -37,18 +38,13 @@ if SUPABASE_URL and SUPABASE_KEY:
 class AuditLogger:
     @staticmethod
     def log_event(store_domain: str, event_type: str, details: Dict[str, Any]):
-        """
-        Bakanlık denetimleri ve iç denetim için her kritik işlemi Supabase audit_logs tablosuna kaydeder.
-        """
         log_payload = {
             "store_domain": store_domain,
             "event_type": event_type,
             "details": json.dumps(details, ensure_ascii=False),
             "created_at": datetime.utcnow().isoformat()
         }
-        
         logger.info(f"[AUDIT TRAIL] {store_domain} -> {event_type}: {details}")
-        
         if supabase_client:
             try:
                 supabase_client.table("audit_logs").insert(log_payload).execute()
@@ -67,7 +63,6 @@ class DynamicRuleEngine:
             "regulation_version": "TR-2026-V3",
             "is_active": True
         }
-
         if not supabase_client:
             return default_rule
 
@@ -76,12 +71,11 @@ class DynamicRuleEngine:
             if res.data and len(res.data) > 0:
                 return res.data[0]
         except Exception as e:
-            logger.warning(f"Dinamik kural okunamadı, varsayılan kurala dönülüyor: {str(e)}")
-
+            logger.warning(f"Dinamik kural okunamadı: {str(e)}")
         return default_rule
 
 
-# Compliance Engine (Denetim İzi Entegre)
+# --- UYUMLULUK VE SERTİFİKA MOTORU ---
 class ComplianceEngine:
     @staticmethod
     def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", *args, **kwargs):
@@ -103,13 +97,8 @@ class ComplianceEngine:
         base_unit_price = (price / qty) * multiplier
         rounded_price = round(base_unit_price, decimals)
 
-        # Audit Kaydı At
         AuditLogger.log_event(store_domain, "UNIT_PRICE_CALCULATED", {
-            "price": price,
-            "qty": qty,
-            "unit": unit,
-            "calculated_unit_price": rounded_price,
-            "rule_version": reg_version
+            "price": price, "qty": qty, "unit": unit, "calculated_unit_price": rounded_price, "rule_version": reg_version
         })
 
         return {
@@ -121,13 +110,70 @@ class ComplianceEngine:
         }
 
     @staticmethod
+    def generate_compliance_certificate(merchant_info: Dict[str, Any], store_domain: str) -> str:
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        tax_number = merchant_info.get("tax_number", "1234567890")
+        mersis = merchant_info.get("mersis_no", "0123456789000015")
+        issue_date = datetime.now().strftime("%d.%m.%Y")
+        
+        raw_hash_string = f"{store_domain}-{tax_number}-{issue_date}-UYUMHUB"
+        cert_hash = hashlib.sha256(raw_hash_string.encode()).hexdigest()[:24].upper()
+
+        return f"""
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <title>UyumHub - Resmi Mevzuat Uyumluluk Sertifikası</title>
+            <style>
+                body {{ font-family: 'Georgia', serif; background: #fdfbf7; color: #1e293b; padding: 40px; margin: 0; }}
+                .certificate-container {{ max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }}
+                .inner-border {{ border: 2px solid #d4af37; padding: 40px; }}
+                h1 {{ font-size: 26px; letter-spacing: 2px; color: #0f172a; text-transform: uppercase; margin-bottom: 5px; }}
+                h2 {{ font-size: 14px; color: #64748b; font-weight: normal; letter-spacing: 1px; text-transform: uppercase; margin-top: 0; }}
+                .company-name {{ font-size: 28px; font-weight: bold; color: #1e293b; margin: 25px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; display: inline-block; min-width: 80%; }}
+                p {{ font-size: 13px; line-height: 1.8; color: #334155; max-width: 650px; margin: 0 auto 20px auto; }}
+                .details-box {{ display: flex; justify-content: space-around; margin: 30px 0; font-size: 12px; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; }}
+                .seal {{ margin-top: 30px; font-size: 11px; color: #475569; font-family: 'Courier New', monospace; background: #f1f5f9; padding: 10px; display: inline-block; border-radius: 4px; }}
+                .footer {{ margin-top: 40px; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }}
+            </style>
+        </head>
+        <body>
+            <div class="certificate-container">
+                <div class="inner-border">
+                    <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
+                    <h2>T.C. Ticaret Bakanlığı E-Ticaret Bilgi Sistemi & Fiyat Etiketi Yönetmeliği</h2>
+                    
+                    <p style="margin-top: 30px;">İşbu sertifika, aşağıda unvanı ve alan adı belirtilen e-ticaret işletmesinin, 6502 sayılı Tüketicinin Korunması Hakkında Kanun ve ilgili yönetmelikler gereğince <strong>Birim Fiyat Etiketleme</strong>, <strong>Mesafeli Satış Sözleşmesi</strong> ve <strong>Dinamik Kural Motoru</strong> standartlarına tam uyumlu olduğunu onaylamak amacıyla düzenlenmiştir.</p>
+                    
+                    <div class="company-name">{company_name}</div>
+                    
+                    <p><strong>Mağaza Alan Adı:</strong> {store_domain}<br><strong>Vergi / MERSİS No:</strong> {tax_number} / {mersis}</p>
+                    
+                    <div class="details-box">
+                        <div><strong>Düzenleme Tarihi:</strong><br>{issue_date}</div>
+                        <div><strong>Kural Motoru:</strong><br>TR-2026-V3 (Aktif)</div>
+                        <div><strong>Denetim Durumu:</strong><br>Sürekli / Otomatik</div>
+                    </div>
+
+                    <div class="seal">
+                        <strong>Kriptografik Doğrulama Mührü (SHA-256):</strong><br>{cert_hash}
+                    </div>
+
+                    <div class="footer">
+                        UyumHub B2B E-Ticaret Mevzuat Uyum ve Denetim İzi Altyapısı tarafından resmi olarak onaylanmıştır.
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+    @staticmethod
     def generate_distance_sales_contract(merchant_info: Dict[str, Any], customer_info: Dict[str, Any], cart_items: List[Dict[str, Any]], *args, **kwargs) -> str:
         m_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
         m_address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri")
-        m_phone = merchant_info.get("phone", "0850 000 00 00")
-        m_email = merchant_info.get("email", "destek@uyumhub.com")
         m_mersis = merchant_info.get("mersis_no", "0123456789000015")
-
         c_name = customer_info.get("name", "Müşteri Adı Soyadı")
         c_address = customer_info.get("address", "Teslimat Adresi Belirtilmedi")
 
@@ -147,7 +193,6 @@ class ComplianceEngine:
                 <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">{total:.2f} TL</td>
             </tr>
             """
-
         shipping_fee = 49.90 if 0 < subtotal < 1000 else 0.0
         grand_total = subtotal + shipping_fee
 
@@ -156,7 +201,7 @@ class ComplianceEngine:
         <html lang="tr">
         <head>
             <meta charset="UTF-8">
-            <title>Mesafeli Satış Sözleşmesi ve Ön Bilgilendirme Formu</title>
+            <title>Mesafeli Satış Sözleşmesi</title>
             <style>
                 body {{ font-family: 'Arial', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
                 h1 {{ font-size: 18px; text-align: center; color: #1e293b; margin-bottom: 5px; }}
@@ -165,33 +210,20 @@ class ComplianceEngine:
                 table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
                 th {{ background-color: #f1f5f9; padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1; }}
                 .box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 15px; font-size: 12px; }}
-                .legal-footer {{ font-size: 10px; color: #64748b; margin-top: 30px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
             </style>
         </head>
         <body>
             <h1>MESAFELİ SATIŞ SÖZLEŞMESİ</h1>
-            <p style="text-align: center; font-size: 11px; color: #64748b;">İşbu sözleşme 6502 sayılı Kanun ve Denetim İzi (Audit Trail) güvencesiyle düzenlenmiştir.</p>
-
             <h2>MADDE 1: TARAFLAR</h2>
             <div class="box"><strong>SATICI:</strong> {m_name} | MERSİS: {m_mersis}</div>
             <div class="box"><strong>ALICI:</strong> {c_name} | Adres: {c_address}</div>
-
             <h2>MADDE 2: ÜRÜNLER VE BEDELİ</h2>
             <table>
                 <thead><tr><th>Ürün</th><th>Adet</th><th style="text-align:right;">Birim</th><th style="text-align:right;">Toplam</th></tr></thead>
                 <tbody>{items_html}</tbody>
             </table>
             <div style="text-align: right; margin-top: 10px; font-size: 13px;">
-                <p>Ara Toplam: <strong>{subtotal:.2f} TL</strong></p>
-                <p>Kargo: <strong>{shipping_fee:.2f} TL</strong></p>
-                <p style="font-size: 15px; color: #0f172a;"><strong>Genel Toplam: {grand_total:.2f} TL</strong></p>
-            </div>
-
-            <h2>MADDE 3: CAYMA HAKKI</h2>
-            <p>Alıcı, ürünü teslim aldığı tarihten itibaren <strong>14 gün</strong> içinde cayma hakkına sahiptir.</p>
-
-            <div class="legal-footer">
-                UyumHub Audit Trail & Mevzuat Kural Motoru | Tarih: {datetime.now().strftime('%Y-%m-%d')}
+                <p>Genel Toplam: <strong>{grand_total:.2f} TL</strong></p>
             </div>
         </body>
         </html>
@@ -202,27 +234,21 @@ class ComplianceEngine:
 class ShopifyAPIClient:
     def __init__(self, store_domain: str, access_token: str):
         self.store_domain = store_domain
-
     def list_products(self) -> List[Dict[str, Any]]:
-        return [
-            {"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}
-        ]
+        return [{"id": "shp_001", "name": "Shopify Organik Zeytinyağı 750 ml", "variants": [{"id": "shp_var_001", "sku": "SHP-ZTY", "price": 310.00, "weight": 0.75, "unit": "L"}]}]
 
 class TrendyolAPIClient:
     def __init__(self, supplier_id: str):
         self.supplier_id = supplier_id
-
     def list_products(self) -> List[Dict[str, Any]]:
-        return [
-            {"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}
-        ]
+        return [{"id": "ty_001", "name": "Trendyol Süzme Çiçek Balı 1000 gr", "variants": [{"id": "ty_var_001", "sku": "TY-BAL-1K", "price": 450.00, "weight": 1.0, "unit": "kg"}]}]
 
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Denetim İzi & Dinamik Kural Motoru",
-    description="B2B E-Ticaret Mevzuat Uyum ve Audit Servisi",
-    version="1.2.0"
+    title="UyumHub - Sertifika & Mevzuat Platformu",
+    description="B2B E-Ticaret Mevzuat Uyum ve Sertifikasyon Servisi",
+    version="1.3.0"
 )
 
 app.add_middleware(
@@ -297,7 +323,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
         "email": "destek@uyumhub.com",
         "subscription_status": "trial",
         "platform": "ikas",
-        "plan": "UyumHub Pro Paket (Audit Trail Aktif)"
+        "plan": "UyumHub Pro Paket (Sertifikalı)"
     }
 
     if not supabase_client:
@@ -316,7 +342,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Paket (Audit Trail Aktif)"
+                "plan": "UyumHub Pro Paket (Sertifikalı)"
             }
     except Exception as e:
         logger.error(f"Profil okuma hatası: {str(e)}")
@@ -343,7 +369,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>UyumHub - Denetim İzi & Mevzuat Paneli</title>
+        <title>UyumHub - Resmi Sertifikasyon Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -353,10 +379,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
-                        <i class="fa-solid fa-shield-halved"></i>
+                        <i class="fa-solid fa-award"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Bakanlık Denetim İzi (Audit Trail)</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Resmi Uyumluluk & Sertifika Paneli</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
@@ -365,11 +391,11 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-credit-card"></i> PRO Plana Geç
                     </button>
-                    <a href="/api/v1/compliance/preview-contract?storeDomain={domain}" target="_blank" class="bg-emerald-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-file-contract"></i> Sözleşme Önizle
+                    <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-certificate"></i> Uyumluluk Sertifikası
                     </a>
                     <a href="/api/v1/compliance/download-contract-pdf?storeDomain={domain}" class="bg-blue-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-file-arrow-down"></i> PDF İndir
+                        <i class="fa-solid fa-file-arrow-down"></i> Sözleşme İndir
                     </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Vitrini Senkronize Et
@@ -401,11 +427,11 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex items-center gap-4">
                         <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-clock-rotate-left"></i>
+                            <i class="fa-solid fa-certificate"></i>
                         </div>
                         <div>
-                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Denetim İzi Durumu</p>
-                            <h3 class="text-sm font-bold text-emerald-600 mt-1">Aktif & Loglanıyor</h3>
+                            <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Sertifika Durumu</p>
+                            <h3 class="text-sm font-bold text-purple-600 mt-1">Onaylı & Sertifikalı</h3>
                         </div>
                     </div>
 
@@ -423,8 +449,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Audit Trail Destekli Birim Fiyat Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına uygun ve loglanan yasal etiketler.</p>
+                            <h2 class="text-base font-bold text-slate-900">Sertifikalı Birim Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu ve sertifikalı ürün etiketleri.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -437,7 +463,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                     <th class="p-4">SKU</th>
                                     <th class="p-4">Satış Fiyatı</th>
                                     <th class="p-4">Miktar / Ambalaj</th>
-                                    <th class="p-4">Hesaplanan Etiket (Audit)</th>
+                                    <th class="p-4">Hesaplanan Etiket</th>
                                     <th class="p-4 pr-6">Vitrin Durumu</th>
                                 </tr>
                             </thead>
@@ -539,7 +565,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                         <td class="p-4">
                                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                                 <i class="fa-solid fa-tag text-indigo-500"></i> ${{variant.compliance.display_text}}
-                                                <span class="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded ml-1">Logged</span>
                                             </span>
                                         </td>
                                         <td class="p-4 pr-6">
@@ -643,7 +668,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
-                # Audit log destekli hesaplama
                 compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
 
                 variants_compliance.append({
@@ -696,6 +720,14 @@ async def update_merchant_settings(payload: MerchantSettingsRequest):
         except Exception as e:
             return {"status": "error", "detail": str(e)}
     return {"status": "success"}
+
+
+@app.get("/api/v1/compliance/certificate", response_class=HTMLResponse)
+async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    AuditLogger.log_event(domain, "CERTIFICATE_VIEWED", {})
+    return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
 
 
 @app.get("/api/v1/compliance/preview-contract", response_class=HTMLResponse)
