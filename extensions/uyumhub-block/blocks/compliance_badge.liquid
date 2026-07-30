@@ -1,0 +1,45 @@
+{% comment %}
+  UyumHub Compliance-as-Infrastructure Liquid App Block
+  Shopify OS 2.0 Theme Extension
+{% endcomment %}
+
+{% if product %}
+  <div id="uyumhub-badge-container" data-product-id="{{ product.id }}" data-price="{{ product.selected_or_first_available_variant.price | divided_by: 100.0 }}">
+    <!-- Dynamic Badge Rendered by UyumHub API -->
+  </div>
+
+  <script>
+    (function() {
+      const container = document.getElementById('uyumhub-badge-container');
+      if (!container) return;
+
+      const price = container.getAttribute('data-price');
+      const storeDomain = Shopify.shop || 'organikgurme.myshopify.com';
+
+      fetch(`https://tr-compliance-backend.onrender.com/api/v1/shopify/storefront/compliance-badge?price=${price}&weight=1.0&unit=kg&storeDomain=${storeDomain}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'success' && data.badge_html) {
+            container.innerHTML = data.badge_html;
+          }
+        })
+        .catch(err => console.error('UyumHub Badge Error:', err));
+    })();
+  </script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "UyumHub Mevzuat Rozeti",
+  "target": "section",
+  "stylesheet": "uyumhub-style.css",
+  "settings": [
+    {
+      "type": "text",
+      "id": "custom_title",
+      "label": "Rozet Başlığı",
+      "default": "Bakanlık Uyumlu Birim Fiyat"
+    }
+  ]
+}
+{% endschema %}
