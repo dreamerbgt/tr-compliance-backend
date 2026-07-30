@@ -132,7 +132,7 @@ class ComplianceEngine:
             <ol>
                 <li>Alıcı, internet sitesinde sözleşme konusu ürünün temel nitelikleri, satış fiyatı ve ödeme şekli ile teslimata ilişkin ön bilgileri okuyup bilgi sahibi olduğunu ve elektronik ortamda gerekli teyidi verdiğini beyan eder.</li>
                 <li>Sözleşme konusu ürün, yasal 30 günlük süreyi aşmamak kaydı ile alıcının yerleşim yerinin uzaklığına bağlı olarak internet sitesinde ön bilgiler içinde açıklanan süre zarfında alıcı veya gösterdiği adresteki kişi/kuruluşa teslim edilir.</li>
-                <li>Ürünün teslim edキュリティe masrafı olan kargo ücreti aksi belirtilmedikçe Alıcı'ya aittir.</li>
+                <li>Ürünün teslim edilme masrafı olan kargo ücreti aksi belirtilmedikçe Alıcı'ya aittir.</li>
             </ol>
 
             <h2>MADDE 4: CAYMA HAKKI</h2>

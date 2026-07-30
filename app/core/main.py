@@ -4,6 +4,7 @@ import logging
 import traceback
 import urllib.request
 import urllib.parse
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -104,10 +105,13 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
     if not supabase_client:
         return False, "Supabase bağlantısı yok."
     
+    trial_end = (datetime.utcnow() + timedelta(days=14)).isoformat()
     merchant_data = {
         "store_domain": domain,
         "access_token": access_token,
-        "platform": "ikas"
+        "platform": "ikas",
+        "subscription_status": "trial",
+        "trial_ends_at": trial_end
     }
 
     try:
@@ -117,7 +121,10 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
         try:
             existing = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
             if existing.data:
-                supabase_client.table("merchants").update(merchant_data).eq("store_domain", domain).execute()
+                supabase_client.table("merchants").update({
+                    "access_token": access_token,
+                    "platform": "ikas"
+                }).eq("store_domain", domain).execute()
             else:
                 supabase_client.table("merchants").insert(merchant_data).execute()
             return True, "Fallback kayıt başarılı"
@@ -125,11 +132,41 @@ def save_merchant_to_supabase(domain: str, access_token: str) -> tuple[bool, str
             return False, str(e_fallback)
 
 
-# --- DASHBOARD UI (HTML RESPONSE) ---
+def get_merchant_subscription(domain: str) -> Dict[str, Any]:
+    if not supabase_client:
+        return {"status": "active", "plan": "Pro (Mock)", "days_left": 14}
+    
+    try:
+        res = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
+        if res.data and len(res.data) > 0:
+            m = res.data[0]
+            status = m.get("subscription_status", "trial")
+            return {
+                "status": status,
+                "plan": "UyumHub Pro Paket",
+                "days_left": 14,
+                "is_active": status in ["trial", "active"]
+            }
+    except Exception as e:
+        logger.error(f"Abonelik okuma hatası: {str(e)}")
+    
+    return {"status": "trial", "plan": "UyumHub Pro Paket", "days_left": 14, "is_active": True}
+
+
+# --- DASHBOARD UI (FATURALANDIRMA VE ABONELİK ENTEGRELİ) ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
+    sub_info = get_merchant_subscription(domain)
     
+    status_badge = ""
+    if sub_info["status"] == "trial":
+        status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">14 Günlük Ücretsiz Deneme (Aktif)</span>'
+    elif sub_info["status"] == "active":
+        status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">PRO Abonelik (Aktif)</span>'
+    else:
+        status_badge = f'<span class="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">Deneme Süresi Doldu!</span>'
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="tr">
@@ -154,14 +191,15 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <p class="text-sm text-slate-500">Bağlı Mağaza: <span class="font-semibold text-indigo-600" id="store-domain">{domain}</span></p>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        Sistem Aktif & Uyumlu
-                    </span>
+                <div class="flex items-center gap-3 flex-wrap">
+                    {status_badge}
+                    <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-credit-card"></i>
+                        <span>PRO Plana Geç (İyzico)</span>
+                    </button>
                     <a href="/api/v1/compliance/preview-contract" target="_blank" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-file-contract"></i>
-                        <span>Sözleşme Önizle (Test)</span>
+                        <span>Sözleşme Önizle</span>
                     </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i>
@@ -199,9 +237,9 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <i class="fa-solid fa-file-contract"></i>
                     </div>
                     <div>
-                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Mesafeli Satış Sözleşmesi</p>
-                        <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-circle-check"></i> Aktif (6502 Uyumlu)
+                        <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Abonelik Durumu</p>
+                        <h3 class="text-sm font-bold text-indigo-600 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-bolt"></i> {sub_info["plan"]}
                         </h3>
                     </div>
                 </div>
@@ -294,6 +332,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 loadProducts();
             }}
 
+            function startCheckout() {{
+                window.location.href = `/api/v1/billing/checkout?storeDomain=${{encodeURIComponent(storeDomain)}}`;
+            }}
+
             window.onload = loadProducts;
         </script>
     </body>
@@ -307,6 +349,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 async def root():
     return RedirectResponse(url="/dashboard")
 
+@app.get("https://tr-compliance-backend.onrender.com/health")
 @app.get("/health")
 async def health():
     return {
@@ -326,6 +369,75 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
         "registered_store": domain,
         "detail": msg
     }
+
+
+# --- İYZİCO ÖDEME & CHECKOUT BAŞLANGIÇ ENDPOINT'İ ---
+@app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
+async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    
+    # Gerçek İyzico CheckoutFormInitialize entegrasyonu için HTML/JS simülasyonu
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub - Güvenli Ödeme (İyzico)</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
+        <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 space-y-6">
+            <div class="text-center space-y-2">
+                <div class="w-16 h-16 bg-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white text-3xl font-bold shadow-lg">
+                    <i class="fa-solid fa-credit-card"></i>
+                </div>
+                <h2 class="text-xl font-bold text-slate-900">UyumHub Pro Abonelik</h2>
+                <p class="text-xs text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
+            </div>
+
+            <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-600">Paket:</span>
+                    <span class="font-bold text-slate-900">Yıllık Pro Uyum Paketi</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-600">Tutar:</span>
+                    <span class="font-bold text-emerald-600 text-base">2.400,00 TL / Yıl</span>
+                </div>
+                <div class="border-t border-slate-200 pt-2 flex justify-between text-xs text-slate-500">
+                    <span>KDV (%20 Dahil)</span>
+                    <span>İyzico Güvencesiyle</span>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <a href="/api/v1/billing/success?storeDomain={domain}" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow-sm text-sm">
+                    <i class="fa-solid fa-lock"></i> Test Ödemesini Tamamla (Sandbox)
+                </a>
+                <a href="/dashboard?storeDomain={domain}" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl transition flex items-center justify-center text-sm">
+                    Geri Dön
+                </a>
+            </div>
+
+            <p class="text-[10px] text-center text-slate-400">256-bit SSL Güvenli Ödeme Altyapısı kullanılmaktadır.</p>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/api/v1/billing/success")
+async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    if supabase_client:
+        try:
+            supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
+        except Exception as e:
+            logger.error(f"Abonelik aktif etme hatası: {str(e)}")
+    
+    return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 
 # --- ÜRÜN SENKRONİZASYON VE İKAS'A GERİ YAZMA ENDPOINT'İ ---
@@ -444,7 +556,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
 # --- SÖZLEŞME ÖNİZLEME (TEST) ENDPOINT'İ ---
 @app.get("/api/v1/compliance/preview-contract", response_class=HTMLResponse)
 async def preview_contract():
-    # Örnek test verileri
     merchant_info = {
         "company_name": "UyumHub E-Ticaret Çözümleri Ltd. Şti.",
         "address": "Kayseri Teknopark 2. Bina No: 42",
