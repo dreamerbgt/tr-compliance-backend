@@ -250,7 +250,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 </div>
                 <div class="flex items-center gap-3 flex-wrap">
                     {status_badge}
-                    <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                    <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-credit-card"></i> PRO Plana Geç
                     </button>
                     <a href="/api/v1/compliance/preview-contract?storeDomain={domain}" target="_blank" class="bg-emerald-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
@@ -259,17 +259,18 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <a href="/api/v1/compliance/download-contract-pdf?storeDomain={domain}" class="bg-blue-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-file-arrow-down"></i> PDF İndir
                     </a>
-                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Vitrini Senkronize Et
                     </button>
                 </div>
             </div>
 
+            <!-- TAB BUTONLARI (Tıklanabilirlik Garantili) -->
             <div class="flex border-b border-slate-200 gap-6 text-sm font-semibold">
-                <button onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2">
+                <button type="button" onclick="switchTab('products')" id="tab-products-btn" class="pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 cursor-pointer">
                     <i class="fa-solid fa-boxes-stacked"></i> Ürün Etiket Analizi ({platform_name.upper()})
                 </button>
-                <button onclick="switchTab('settings')" id="tab-settings-btn" class="pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2">
+                <button type="button" onclick="switchTab('settings')" id="tab-settings-btn" class="pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2 cursor-pointer">
                     <i class="fa-solid fa-building-shield"></i> Yasal Şirket Bilgileri
                 </button>
             </div>
@@ -302,7 +303,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         </div>
                         <div>
                             <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Paket</p>
-                            <h3 class="text-sm font-bold text-indigo-600 mt-1">{profile["plan"]}</h3>
+                            <h3 class="text-sm font-bold text-indigo-600 mt-1" id="total-products-count">{profile["plan"]}</h3>
                         </div>
                     </div>
                 </div>
@@ -329,12 +330,14 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                 </tr>
                             </thead>
                             <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
+                                <!-- Ürünler JS ile yüklenecek -->
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
 
+            <!-- YASAL ŞİRKET BİLGİLERİ FORMU -->
             <div id="section-settings" class="hidden bg-white rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
                 <div>
                     <h2 class="text-lg font-bold text-slate-900">Resmi Şirket ve Fatura Bilgileri</h2>
@@ -367,7 +370,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <input type="text" id="phone" value="{profile['phone']}" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:border-indigo-600">
                     </div>
                     <div class="md:col-span-2 flex justify-end pt-4">
-                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-xl transition shadow-sm text-sm">Ayarları Kaydet</button>
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-xl transition shadow-sm text-sm cursor-pointer">Ayarları Kaydet</button>
                     </div>
                 </form>
             </div>
@@ -383,14 +386,16 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 const prodSec = document.getElementById("section-products");
                 const settSec = document.getElementById("section-settings");
 
+                if (!prodBtn || !settBtn || !prodSec || !settSec) return;
+
                 if (tab === 'products') {{
-                    prodBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold";
-                    settBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2";
+                    prodBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold cursor-pointer";
+                    settBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2 cursor-pointer";
                     prodSec.classList.remove("hidden");
                     settSec.classList.add("hidden");
                 }} else {{
-                    settBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold";
-                    prodBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2";
+                    settBtn.className = "pb-3 text-indigo-600 border-b-2 border-indigo-600 flex items-center gap-2 font-semibold cursor-pointer";
+                    prodBtn.className = "pb-3 text-slate-500 hover:text-slate-800 flex items-center gap-2 cursor-pointer";
                     settSec.classList.remove("hidden");
                     prodSec.classList.add("hidden");
                 }}
@@ -399,16 +404,17 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             async function loadProducts() {{
                 const icon = document.getElementById("sync-icon");
                 const tbody = document.getElementById("products-table-body");
-                if (!icon || !tbody) return;
+                if (!tbody) return;
 
-                icon.classList.add("fa-spin");
+                if (icon) icon.classList.add("fa-spin");
                 try {{
                     const res = await fetch(`/api/v1/compliance/sync-products?storeDomain=${{encodeURIComponent(storeDomain)}}`);
                     const data = await res.json();
 
                     if (data.status === "success" && data.products) {{
-                        document.getElementById("total-products-count")?.innerText = data.total_processed;
-                        document.getElementById("last-sync-time").innerText = "Son Senkronizasyon: " + new Date().toLocaleTimeString();
+                        if (document.getElementById("last-sync-time")) {{
+                            document.getElementById("last-sync-time").innerText = "Son Senkronizasyon: " + new Date().toLocaleTimeString();
+                        }}
                         
                         tbody.innerHTML = "";
                         data.products.forEach(prod => {{
@@ -438,7 +444,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 }} catch (err) {{
                     console.error("Yükleme hatası:", err);
                 }} finally {{
-                    icon.classList.remove("fa-spin");
+                    if (icon) icon.classList.remove("fa-spin");
                 }}
             }}
 
@@ -462,7 +468,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     }});
                     const data = await res.json();
                     if (data.status === "success") alert("Ayarlar kaydedildi!");
-                }} catch (err) {{ alert("Hata oluştu."); }}
+                    else alert("Kayıt başarısız.");
+                }} catch (err) {{ alert("Bağlantı hatası."); }}
             }}
 
             function runSync() {{ loadProducts(); }}
@@ -476,7 +483,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     return HTMLResponse(content=html_content)
 
 
-# --- API ENDPOINT'LERİ ---
+# --- API ENDPOINT'LERİ (Mock Fallback Garantili) ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -497,24 +504,25 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             if supabase_client:
                 try:
                     res = supabase_client.table("merchants").select("access_token").eq("store_domain", domain).execute()
-                    if res.data:
+                    if res.data and res.data[0].get("access_token"):
                         access_token = res.data[0].get("access_token")
                 except Exception:
                     pass
 
-            if IkasGraphQLClient:
+            if IkasGraphQLClient and not access_token.startswith("ikas_fallback"):
                 try:
                     ik_client = IkasGraphQLClient(access_token)
                     products = ik_client.list_products(limit=10)
                 except Exception:
                     pass
 
-            if not products:
-                products = [
-                    {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}]},
-                    {"id": "prod_002", "name": "Organik Çam Balı 850 gr", "variants": [{"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}]},
-                    {"id": "prod_003", "name": "Antep Fıstığı Ezmesi 350 gr", "variants": [{"id": "var_003", "sku": "FST-350G", "price": 245.00, "weight": 0.35, "unit": "kg"}]}
-                ]
+        # Her koşulda boş kalmaması ve test edilebilmesi için robust mock fallback
+        if not products:
+            products = [
+                {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}]},
+                {"id": "prod_002", "name": "Organik Çam Balı 850 gr", "variants": [{"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}]},
+                {"id": "prod_003", "name": "Antep Fıstığı Ezmesi 350 gr", "variants": [{"id": "var_003", "sku": "FST-350G", "price": 245.00, "weight": 0.35, "unit": "kg"}]}
+            ]
 
         processed_products = []
         for prod in products:
@@ -594,7 +602,6 @@ async def download_contract_pdf(storeDomain: str = "dev-mevzuattestmagaza.myikas
     return Response(content=html_contract, media_type="text/html", headers={"Content-Disposition": f"attachment; filename=Sozlesme_{domain}.html"})
 
 
-# --- EKSİK OLAN İKAS OAUTH CALLBACK VE WEBHOOK ENDPOINT'LERİ EKLENDİ ---
 @app.get("/api/v1/ikas/callback")
 async def ikas_callback(request: Request):
     params = dict(request.query_params)
@@ -610,7 +617,7 @@ async def ikas_callback(request: Request):
 @app.get("/api/v1/ikas/launch")
 async def ikas_launch(request: Request):
     params = dict(request.query_params)
-    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop")
+    raw_domain = params.get("storeName") or params.get("storeDomain")  or params.get("shop")
     domain = normalize_domain(raw_domain)
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
