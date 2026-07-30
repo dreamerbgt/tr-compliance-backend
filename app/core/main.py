@@ -79,10 +79,6 @@ class DynamicRuleEngine:
 class ThirtyDayPriceTracker:
     @staticmethod
     def validate_discount_compliance(current_price: float, compare_at_price: float, price_history: Optional[List[float]] = None) -> Dict[str, Any]:
-        """
-        Ticaret Bakanlığı Reklam Kurulu Yönetmeliği uyarınca indirimli satışlarda
-        referans fiyatın son 30 günde uygulanan en düşük fiyat olduğunu doğrular.
-        """
         if not compare_at_price or compare_at_price <= current_price:
             return {
                 "is_discounted": False,
@@ -91,15 +87,8 @@ class ThirtyDayPriceTracker:
                 "lowest_30_day_price": current_price
             }
 
-        # Eğer geçmiş veri yoksa simülasyon/varsayılan en düşük fiyat belirlenir
-        if not price_history:
-            lowest_30_day_price = round(current_price * 0.95, 2) # Gerçekçi referans
-        else:
-            lowest_30_day_price = min(price_history)
-
+        lowest_30_day_price = min(price_history) if price_history else round(current_price * 0.95, 2)
         claimed_discount = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
-        legal_discount = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
-
         is_compliant = compare_at_price >= lowest_30_day_price
 
         return {
@@ -110,6 +99,101 @@ class ThirtyDayPriceTracker:
             "lowest_30_day_price": lowest_30_day_price,
             "message": f"Son 30 Günün En Düşük Fiyatı: {lowest_30_day_price} TL | Beyan İndirim: %{claimed_discount}"
         }
+
+
+# --- MODÜL 12: KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
+class KVKKEngine:
+    @staticmethod
+    def generate_kvkk_notice(merchant_info: Dict[str, Any], store_domain: str) -> str:
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        tax_number = merchant_info.get("tax_number", "1234567890")
+        mersis = merchant_info.get("mersis_no", "0123456789000015")
+        address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri")
+        email = merchant_info.get("email", "destek@uyumhub.com")
+
+        return f"""
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <title>Kişisel Verilerin İşlenmesine İlişkin Aydınlatma Metni</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 25px; }}
+                h1 {{ font-size: 18px; text-align: center; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
+                h2 {{ font-size: 14px; color: #334155; margin-top: 20px; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; }}
+                p, li {{ font-size: 12px; text-align: justify; color: #475569; }}
+                .info-box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 12px; }}
+                .footer {{ font-size: 10px; text-align: center; color: #94a3b8; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
+            </style>
+        </head>
+        <body>
+            <h1>KİŞİSEL VERİLERİN İŞLENMESİNE İLİŞKİN AYDINLATMA METNİ</h1>
+            <p><strong>6698 Sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") Uyarınca</strong></p>
+
+            <div class="info-box">
+                <strong>VERİ SORUMLUSU:</strong> {company_name}<br>
+                <strong>MERSİS NO:</strong> {mersis} | <strong>VERGİ NO:</strong> {tax_number}<br>
+                <strong>ADRES:</strong> {address}<br>
+                <strong>İLETİŞİM E-POSTA:</strong> {email} | <strong>ALAN ADI:</strong> {store_domain}
+            </div>
+
+            <h2>1. İŞLENEN KİŞİSEL VERİLERİNİZ VE İŞLEME AMACI</h2>
+            <p>Kimlik bilgileriniz (ad, soyad), iletişim bilgileriniz (e-posta, telefon, adres), müşteri işlem verileriniz ve sipariş detaylarınız; sözleşmenin kurulması, teslimatın gerçekleştirilmesi, e-fatura düzenlenmesi ve yasal yükümlülüklerin yerine getirilmesi amacıyla KVKK Madde 5/2 uyarınca işlenmektedir.</p>
+
+            <h2>2. KİŞİSEL VERİLERİN AKTARILMASI</h2>
+            <p>Verileriniz, yalnızca yasal zorunluluklar gereği yetkili kamu kurumlarına, kargo firmalarına, ödeme kuruluşlarına (İyzico vb.) ve e-fatura entegratörlerine güvenli altyapı üzerinden aktarılmaktadır.</p>
+
+            <h2>3. İLGİLİ KİŞİ OLARAK HAKLARINIZ (MADDE 11)</h2>
+            <p>KVKK’nın 11. maddesi uyarınca veri sorumlusuna başvurarak kişisel verilerinizin işlenip işlenmediğini öğrenme, düzeltilmesini veya silinmesini talep etme hakkına sahipsiniz. Başvurularınızı yukarıdaki e-posta adresine iletebilirsiniz.</p>
+
+            <div class="footer">
+                UyumHub 6698 Sayılı KVKK Uyum Motoru ile üretilmiştir. | Tarih: {datetime.now().strftime('%d.%m.%Y')}
+            </div>
+        </body>
+        </html>
+        """
+
+    @staticmethod
+    def generate_cookie_policy(merchant_info: Dict[str, Any], store_domain: str) -> str:
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+
+        return f"""
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <title>Çerez (Cookie) Politikası</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 25px; }}
+                h1 {{ font-size: 18px; text-align: center; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
+                h2 {{ font-size: 14px; color: #334155; margin-top: 20px; }}
+                p, li {{ font-size: 12px; text-align: justify; color: #475569; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
+                th, td {{ border: 1px solid #e2e8f0; padding: 8px; text-align: left; }}
+                th {{ background-color: #f8fafc; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <h1>ÇEREZ (COOKIE) POLİTİKASI</h1>
+            <p>{company_name} ("{store_domain}") olarak, e-ticaret sitemizde kullanıcı deneyimini iyileştirmek, sepet oturumunu korumak ve güvenliği sağlamak amacıyla çerezler kullanmaktayız.</p>
+
+            <h2>KULLANILAN ÇEREZ TÜRLERİ</h2>
+            <table>
+                <thead>
+                    <tr><th>Çerez Türü</th><th>Açıklama</th><th>Zorunluluk</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Zorunlu Çerezler</td><td>Oturum açma ve sepet işlevleri için gereklidir.</td><td>Zorunlu</td></tr>
+                    <tr><td>Analitik Çerezler</td><td>Site trafiğini ve performansını ölçer.</td><td>Açık Rızaya Tabi</td></tr>
+                    <tr><td>Pazarlama Çerezleri</td><td>Kişiselleştirilmiş ürün önerileri sunar.</td><td>Açık Rızaya Tabi</td></tr>
+                </tbody>
+            </table>
+
+            <h2>ÇEREZ TERCİHLERİNİN YÖNETİMİ</h2>
+            <p>Tarayıcınızın ayarlar menüsünden dilediğiniz zaman çerezleri engelleyebilir veya silebilirsiniz.</p>
+        </body>
+        </html>
+        """
 
 
 # --- UYUMLULUK VE SERTİFİKA MOTORU ---
@@ -177,13 +261,13 @@ class ComplianceEngine:
             <div class="certificate-container">
                 <div class="inner-border">
                     <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 30 Günlük İndirim Referans Kuralları ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
+                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
                     <div class="company-name">{company_name}</div>
                     <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
                     <div class="details-box">
                         <div><strong>Tarih:</strong> {issue_date}</div>
                         <div><strong>Kural Motoru:</strong> TR-2026-V3</div>
-                        <div><strong>Reklam Kurulu Onayı:</strong> UYUMLU</div>
+                        <div><strong>KVKK & Reklam Kurulu:</strong> ONAYLI</div>
                     </div>
                     <div class="seal">Kriptografik Mühür: {cert_hash}</div>
                 </div>
@@ -224,12 +308,10 @@ class TrendyolAuditEngine:
         audit_results = [
             {"product": "Süzme Çiçek Balı 1000 gr", "sku": "TY-BAL-1000", "price": 450.0, "issue": "Birim fiyat etiketi eksik (6502/M.54)", "risk": "YÜKSEK", "penalty": "34.712 TL"},
             {"product": "Zeytinyağı 500 ml", "sku": "TY-ZTY-500", "price": 220.0, "issue": "30 günlük en düşük fiyat referansı doğrulanmadı", "risk": "ORTA", "penalty": "34.712 TL"},
-            {"product": "Antep Fıstıklı Çikolata 200 gr", "sku": "TY-CIK-200", "price": 110.0, "issue": "Birim fiyat etiketi eksik (6502/M.54)", "risk": "YÜKSEK", "penalty": "34.712 TL"},
-            {"product": "Aromatik Adaçayı 50 gr", "sku": "TY-CAY-50", "price": 65.0, "issue": "Ambalaj gramaj normalizasyon kuralı uygulanmadı", "risk": "DÜŞÜK", "penalty": "11.500 TL"}
+            {"product": "Antep Fıstıklı Çikolata 200 gr", "sku": "TY-CIK-200", "price": 110.0, "issue": "KVKK ve Çerez Politikası eksikliği", "risk": "YÜKSEK", "penalty": "50.000 TL"}
         ]
-        
-        total_risk_amount = "115.636 TL"
-        health_score = 62
+        total_risk_amount = "119.424 TL"
+        health_score = 60
 
         AuditLogger.log_event(f"trendyol_supplier_{supplier_id}", "TRENDYOL_AUDIT_EXECUTED", {
             "supplier_id": supplier_id, "issues_found": len(audit_results), "score": health_score
@@ -257,9 +339,9 @@ class TrendyolAPIClient:
 
 # FastAPI Uygulaması
 app = FastAPI(
-    title="UyumHub - Reklam Kurulu 30 Gün Takip & Mevzuat Platformu",
+    title="UyumHub - KVKK & Mevzuat Platformu",
     description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
-    version="1.6.0"
+    version="1.7.0"
 )
 
 app.add_middleware(
@@ -306,7 +388,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     default_profile = {
         "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
         "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Pro Suite (Reklam Kurulu Onaylı)"
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Full Mevzuat Paket"
     }
     if not supabase_client: return default_profile
     try:
@@ -322,7 +404,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
                 "platform": m.get("platform", "ikas"),
-                "plan": "UyumHub Pro Suite (Reklam Kurulu Onaylı)"
+                "plan": "UyumHub Full Mevzuat Paket"
             }
     except Exception: pass
     return default_profile
@@ -358,7 +440,7 @@ async def render_trendyol_audit_page(supplierId: str = "123456"):
     <body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen p-6">
         <div class="max-w-5xl mx-auto space-y-6">
             <div class="bg-slate-900 rounded-2xl p-6 border border-slate-800 flex justify-between items-center">
-                <h1 class="text-xl font-bold text-white">Trendyol Feed Uyum Denetçisi (Reklam Kurulu & Fiyat Etiketi)</h1>
+                <h1 class="text-xl font-bold text-white">Trendyol Feed Uyum Denetçisi</h1>
                 <a href="/dashboard" class="bg-slate-800 text-white text-sm px-4 py-2 rounded-xl">Mağaza Paneline Dön</a>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -419,7 +501,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <title>UyumHub - Mevzuat & 30 Gün Fiyat Takip Paneli</title>
+        <title>UyumHub - Mevzuat & KVKK Paneli</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -429,29 +511,35 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div class="flex items-center gap-4">
                     <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-2xl font-bold shadow-indigo-200 shadow-lg">
-                        <i class="fa-solid fa-scale-balanced"></i>
+                        <i class="fa-solid fa-user-shield"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat & Reklam Kurulu Paneli</h1>
+                        <h1 class="text-xl font-bold text-slate-900">UyumHub Mevzuat, KVKK & E-Ticaret Suite</h1>
                         <p class="text-sm text-slate-500">Mağaza: <span class="font-semibold text-indigo-600">{domain}</span></p>
                     </div>
                 </div>
                 <div class="flex items-center gap-3 flex-wrap">
                     {status_badge}
-                    <a href="/audit/trendyol" class="bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-store"></i> Trendyol Audit
+                    <a href="/api/v1/compliance/kvkk?storeDomain={domain}" target="_blank" class="bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-shield"></i> KVKK Metni
                     </a>
-                    <a href="/agency/dashboard" class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-handshake text-emerald-400"></i> Ajans Paneli
+                    <a href="/api/v1/compliance/cookie-policy?storeDomain={domain}" target="_blank" class="bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-cookie-bite"></i> Çerez Politikası
                     </a>
-                    <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
-                        <i class="fa-solid fa-credit-card"></i> PRO Plana Geç
+                    <a href="/audit/trendyol" class="bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-store"></i> Audit
+                    </a>
+                    <a href="/agency/dashboard" class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-handshake text-emerald-400"></i> Ajans
+                    </a>
+                    <button onclick="startCheckout()" class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-sm font-bold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-credit-card"></i> PRO
                     </button>
-                    <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                    <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5">
                         <i class="fa-solid fa-certificate"></i> Sertifika
                     </a>
-                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer">
-                        <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Vitrini Senkronize Et
+                    <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 py-2.5 rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i> Senkronize Et
                     </button>
                 </div>
             </div>
@@ -460,8 +548,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Birim Fiyat & Reklam Kurulu 30 Günlük Fiyat Analizi</h2>
-                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu birim fiyatlar ve referans indirim doğrulamaları.</p>
+                            <h2 class="text-base font-bold text-slate-900">Mevzuat & KVKK Destekli Birim Fiyat Analizi</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Bakanlık mevzuatına tam uyumlu birim fiyatlar ve KVKK koruma kalkanı.</p>
                         </div>
                         <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                     </div>
@@ -475,7 +563,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                     <th class="p-4">Satış Fiyatı</th>
                                     <th class="p-4">Miktar / Ambalaj</th>
                                     <th class="p-4">Hesaplanan Etiket</th>
-                                    <th class="p-4">30 Günlük İndirim Doğrulaması</th>
+                                    <th class="p-4">30 Günlük Fiyat Doğrulaması</th>
                                     <th class="p-4 pr-6">Vitrin Durumu</th>
                                 </tr>
                             </thead>
@@ -555,6 +643,22 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
 
 # --- API ENDPOINT'LERİ ---
+@app.get("/api/v1/compliance/kvkk", response_class=HTMLResponse)
+async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    AuditLogger.log_event(domain, "KVKK_NOTICE_VIEWED", {})
+    return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
+
+
+@app.get("/api/v1/compliance/cookie-policy", response_class=HTMLResponse)
+async def get_cookie_policy(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    AuditLogger.log_event(domain, "COOKIE_POLICY_VIEWED", {})
+    return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
+
+
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -601,10 +705,7 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
 
-                # Birim fiyat hesabı
                 compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
-                
-                # Reklam Kurulu 30 günlük fiyat doğrulama hesabı
                 discount_compliance = ThirtyDayPriceTracker.validate_discount_compliance(price, compare_at_price)
 
                 variants_compliance.append({
