@@ -254,3 +254,79 @@ async def generate_contract(payload: DistanceContractRequest):
         cart_items=payload.cart_items
     )
     return {"status": "success", "contract_html": contract_html}
+
+
+# app/core/ikas_client.py dosyasından istemciyi içe aktar
+try:
+    from app.core.ikas_client import IkasGraphQLClient
+except ImportError:
+    from ikas_client import IkasGraphQLClient
+
+
+@app.get("/api/v1/compliance/sync-products")
+async def sync_products(storeDomain: str):
+    """
+    Belirtilen mağazanın Supabase'deki access_token'ını alır,
+    İkas'tan ürünleri çeker ve Fiyat Etiketi Yönetmeliği'ne göre birim fiyatlarını hesaplar.
+    """
+    domain = normalize_domain(storeDomain)
+    if not domain:
+        raise HTTPException(status_code=400, detail="Geçersiz mağaza domaini.")
+
+    # 1. Supabase'den mağaza token'ını al
+    if not supabase_client:
+        raise HTTPException(status_code=500, detail="Veritabanı bağlantısı bulunamadı.")
+
+    try:
+        res = supabase_client.table("merchants").select("access_token").eq("store_domain", domain).execute()
+        if not res.data:
+            raise HTTPException(status_code=444, detail="Mağaza bulunamadı. Lütfen önce uygulamayı yetkilendirin.")
+        
+        access_token = res.data[0].get("access_token")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Veritabanı okuma hatası: {str(e)}")
+
+    # 2. İkas GraphQL ile ürünleri çek
+    client = IkasGraphQLClient(access_token=access_token)
+    products = client.list_products(limit=10)
+
+    processed_products = []
+
+    # 3. Her ürün varyantı için birim fiyat hesapla
+    for prod in products:
+        prod_id = prod.get("id")
+        prod_name = prod.get("name")
+        variants_compliance = []
+
+        for variant in prod.get("variants", []):
+            price = variant.get("price", 0.0)
+            weight = variant.get("weight", 1.0)  # Varsayılan ağırlık/hacim
+            unit = variant.get("unit", "kg")
+
+            # Mevzuat motorumuz birim fiyatı hesaplıyor
+            compliance_result = ComplianceEngine.calculate_unit_price(
+                price=price,
+                weight_or_volume=weight,
+                unit=unit
+            )
+
+            variants_compliance.append({
+                "variant_id": variant.get("id"),
+                "sku": variant.get("sku"),
+                "price": price,
+                "weight": weight,
+                "compliance": compliance_result
+            })
+
+        processed_products.append({
+            "product_id": prod_id,
+            "product_name": prod_name,
+            "variants": variants_compliance
+        })
+
+    return {
+        "status": "success",
+        "store": domain,
+        "total_processed": len(processed_products),
+        "products": processed_products
+    }
