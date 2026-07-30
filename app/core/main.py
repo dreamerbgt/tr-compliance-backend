@@ -159,6 +159,10 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                         Sistem Aktif & Uyumlu
                     </span>
+                    <a href="/api/v1/compliance/preview-contract" target="_blank" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-file-contract"></i>
+                        <span>Sözleşme Önizle (Test)</span>
+                    </a>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i>
                         <span>İkas Vitrinine Senkronize Et</span>
@@ -197,7 +201,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <div>
                         <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Mesafeli Satış Sözleşmesi</p>
                         <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-circle-check"></i> Dinamik Şablon Hazır
+                            <i class="fa-solid fa-circle-check"></i> Aktif (6502 Uyumlu)
                         </h3>
                     </div>
                 </div>
@@ -238,7 +242,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
             const storeDomain = "{domain}";
 
             async function loadProducts() {{
-                const btn = document.getElementById("sync-btn");
                 const icon = document.getElementById("sync-icon");
                 const tbody = document.getElementById("products-table-body");
 
@@ -396,7 +399,6 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                     unit
                 )
 
-                # İkas Vitrinine Geri Yazma İşlemi (GraphQL Mutation)
                 synced_to_ikas = False
                 if not is_mock and client and variant_id and not compliance_result.get("has_error"):
                     unit_price_text = compliance_result.get("display_text")
@@ -437,6 +439,36 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 "traceback": tb.splitlines()[-3:] if tb else []
             }
         )
+
+
+# --- SÖZLEŞME ÖNİZLEME (TEST) ENDPOINT'İ ---
+@app.get("/api/v1/compliance/preview-contract", response_class=HTMLResponse)
+async def preview_contract():
+    # Örnek test verileri
+    merchant_info = {
+        "company_name": "UyumHub E-Ticaret Çözümleri Ltd. Şti.",
+        "address": "Kayseri Teknopark 2. Bina No: 42",
+        "phone": "0350 222 33 44",
+        "email": "hukuk@uyumhub.com",
+        "mersis_no": "0456789123400019"
+    }
+    customer_info = {
+        "name": "Ahmet Yılmaz",
+        "address": "Bağdat Cad. No: 123 D: 5 Kadıköy/İstanbul",
+        "phone": "0532 111 22 33",
+        "email": "ahmet.yilmaz@ornek.com"
+    }
+    cart_items = [
+        {"name": "Ege Sızma Zeytinyağı 1000 ml", "quantity": 2, "price": 380.00},
+        {"name": "Organik Çam Balı 850 gr", "quantity": 1, "price": 425.00}
+    ]
+
+    html_contract = ComplianceEngine.generate_distance_sales_contract(
+        merchant_info=merchant_info,
+        customer_info=customer_info,
+        cart_items=cart_items
+    )
+    return HTMLResponse(content=html_contract)
 
 
 # --- İKAS LAUNCH & CALLBACK ENDPOINT'LERİ ---
