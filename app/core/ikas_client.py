@@ -71,3 +71,24 @@ class IkasGraphQLClient:
         except Exception as e:
             logger.error(f"list_products işlenirken hata: {str(e)}")
         return []
+
+    def update_variant_unit_price_tag(self, variant_id: str, unit_price_text: str) -> bool:
+        """
+        Hesaplanan birim fiyat etiketini İkas Mağazasındaki ilgili varyanta geri yazar.
+        """
+        mutation = """
+        mutation saveProductVariantUnitPrice($id: ID!, $unitPriceText: String!) {
+          saveProductVariant(input: { id: $id, unitPriceText: $unitPriceText }) {
+            id
+            unitPriceText
+          }
+        }
+        """
+        try:
+            result = self._execute_query(mutation, {"id": variant_id, "unitPriceText": unit_price_text})
+            if result.get("success"):
+                logger.info(f"Varyant {variant_id} birim fiyatı güncellendi: {unit_price_text}")
+                return True
+        except Exception as e:
+            logger.error(f"Varyant güncelleme hatası ({variant_id}): {str(e)}")
+        return False

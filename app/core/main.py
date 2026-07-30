@@ -160,8 +160,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                         Sistem Aktif & Uyumlu
                     </span>
                     <button onclick="runSync()" id="sync-btn" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition shadow-sm flex items-center gap-2">
-                        <i class="fa-solid fa-arrows-rotate" id="sync-icon"></i>
-                        <span>Birim Fiyatları Tara & Güncelle</span>
+                        <i class="fa-solid fa-cloud-arrow-up" id="sync-icon"></i>
+                        <span>İkas Vitrinine Senkronize Et</span>
                     </button>
                 </div>
             </div>
@@ -185,7 +185,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                     <div>
                         <p class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fiyat Etiketi Mevzuatı</p>
                         <h3 class="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                            <i class="fa-solid fa-circle-check"></i> Otomatik Hesaplama Aktif
+                            <i class="fa-solid fa-circle-check"></i> Otomatik Senkronizasyon
                         </h3>
                     </div>
                 </div>
@@ -208,7 +208,7 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                     <div>
                         <h2 class="text-base font-bold text-slate-900">Ürün Birim Fiyat Etiket Analizi</h2>
-                        <p class="text-xs text-slate-500 mt-0.5">TR Ticaret Bakanlığı Fiyat Etiketi Yönetmeliği gereğince hesaplanan zorunlu etiketler.</p>
+                        <p class="text-xs text-slate-500 mt-0.5">TR Ticaret Bakanlığı Fiyat Etiketi Yönetmeliği gereğince hesaplanan ve İkas'a yazılan etiketler.</p>
                     </div>
                     <span id="last-sync-time" class="text-xs text-slate-400">Canlı Veri</span>
                 </div>
@@ -221,7 +221,8 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                                 <th class="p-4">SKU</th>
                                 <th class="p-4">Satış Fiyatı</th>
                                 <th class="p-4">Miktar / Ambalaj</th>
-                                <th class="p-4 pr-6">Hesaplanan Birim Fiyat Etiketi</th>
+                                <th class="p-4">Hesaplanan Etiket</th>
+                                <th class="p-4 pr-6">İkas Vitrin Durumu</th>
                             </tr>
                         </thead>
                         <tbody id="products-table-body" class="divide-y divide-slate-100 text-sm">
@@ -249,24 +250,30 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
 
                     if (data.status === "success" && data.products) {{
                         document.getElementById("total-products-count").innerText = data.total_processed;
-                        document.getElementById("last-sync-time").innerText = "Son Güncelleme: " + new Date().toLocaleTimeString();
+                        document.getElementById("last-sync-time").innerText = "Son Senkronizasyon: " + new Date().toLocaleTimeString();
                         
                         tbody.innerHTML = "";
                         
                         data.products.forEach(prod => {{
                             prod.variants.forEach(variant => {{
+                                const isSynced = variant.synced_to_ikas;
+                                const statusBadge = isSynced 
+                                    ? `<span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200"><i class="fa-solid fa-check"></i> Senkronize Edildi</span>`
+                                    : `<span class="inline-flex items-center gap-1 text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200"><i class="fa-solid fa-clock"></i> Hazır (Mock)</span>`;
+
                                 const row = `
                                     <tr class="hover:bg-slate-50/80 transition">
                                         <td class="p-4 pl-6 font-medium text-slate-900">${{prod.product_name}}</td>
                                         <td class="p-4 text-xs font-mono text-slate-500">${{variant.sku || "-"}}</td>
                                         <td class="p-4 font-semibold text-slate-800">${{variant.price.toFixed(2)}} TL</td>
                                         <td class="p-4 text-slate-600">${{variant.weight}} ${{variant.unit}}</td>
-                                        <td class="p-4 pr-6">
+                                        <td class="p-4">
                                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                                 <i class="fa-solid fa-tag text-indigo-500"></i>
                                                 ${{variant.compliance.display_text}}
                                             </span>
                                         </td>
+                                        <td class="p-4 pr-6">${{statusBadge}}</td>
                                     </tr>
                                 `;
                                 tbody.innerHTML += row;
@@ -284,7 +291,6 @@ async def render_dashboard(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"
                 loadProducts();
             }}
 
-            // Sayfa açıldığında otomatik verileri çek
             window.onload = loadProducts;
         </script>
     </body>
@@ -319,7 +325,7 @@ async def force_register(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     }
 
 
-# --- ÜRÜN SENKRONİZASYON VE BİRİM FİYAT ENDPOINT'İ ---
+# --- ÜRÜN SENKRONİZASYON VE İKAS'A GERİ YAZMA ENDPOINT'İ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -337,6 +343,7 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 logger.error(f"Supabase okuma hatası: {str(e)}")
 
         products = []
+        client = None
         if IkasGraphQLClient:
             try:
                 client = IkasGraphQLClient(access_token=access_token)
@@ -344,7 +351,9 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
             except Exception as e:
                 logger.warning(f"Ikas GraphQL veri çekme hatası (Mock veriye geçiliyor): {str(e)}")
 
+        is_mock = False
         if not products:
+            is_mock = True
             products = [
                 {
                     "id": "prod_001",
@@ -379,6 +388,7 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                 price = variant.get("price", 0.0)
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
+                variant_id = variant.get("id")
 
                 compliance_result = ComplianceEngine.calculate_unit_price(
                     price,
@@ -386,13 +396,20 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
                     unit
                 )
 
+                # İkas Vitrinine Geri Yazma İşlemi (GraphQL Mutation)
+                synced_to_ikas = False
+                if not is_mock and client and variant_id and not compliance_result.get("has_error"):
+                    unit_price_text = compliance_result.get("display_text")
+                    synced_to_ikas = client.update_variant_unit_price_tag(variant_id, unit_price_text)
+
                 variants_compliance.append({
-                    "variant_id": variant.get("id"),
+                    "variant_id": variant_id,
                     "sku": variant.get("sku"),
                     "price": price,
                     "weight": weight,
                     "unit": unit,
-                    "compliance": compliance_result
+                    "compliance": compliance_result,
+                    "synced_to_ikas": synced_to_ikas
                 })
 
             processed_products.append({
@@ -429,7 +446,6 @@ async def ikas_launch(request: Request):
     raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop")
     domain = normalize_domain(raw_domain)
 
-    # Direkt Dashboard'a yönlendiriyoruz
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 @app.get("/api/v1/ikas/callback")
