@@ -1,36 +1,38 @@
 import os
 import json
 import logging
+import traceback
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-# Logging
+# Logging Yapılandırması
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UyumHub")
 
-# Ortam değişkenleri
+# Ortam Değişkenleri
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 IKAS_CLIENT_ID = os.getenv("IKAS_CLIENT_ID", "")
 IKAS_CLIENT_SECRET = os.getenv("IKAS_CLIENT_SECRET", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://tr-compliance-backend.onrender.com")
 
-# Supabase istemcisi (opsiyonel)
+# Supabase İstemcisi
 supabase_client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         from supabase import create_client
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("Supabase bağlantısı başarılı.")
+        logger.info("Supabase bağlantısı başarıyla oluşturuldu.")
     except Exception as e:
-        logger.error(f"Supabase başlatma hatası: {e}")
+        logger.error(f"Supabase başlatma hatası: {str(e)}")
 
-# --- Audit Trail ---
+
+# --- AUDIT TRAIL (BAKANLIK DENETİM İZİ) SERVİSİ ---
 class AuditLogger:
     @staticmethod
     def log_event(store_domain: str, event_type: str, details: Dict[str, Any]):
@@ -40,18 +42,19 @@ class AuditLogger:
             "details": json.dumps(details, ensure_ascii=False),
             "created_at": datetime.utcnow().isoformat()
         }
-        logger.info(f"[AUDIT] {store_domain} -> {event_type}: {details}")
+        logger.info(f"[AUDIT TRAIL] {store_domain} -> {event_type}: {details}")
         if supabase_client:
             try:
                 supabase_client.table("audit_logs").insert(log_payload).execute()
             except Exception as e:
-                logger.error(f"Audit log yazılamadı: {e}")
+                logger.error(f"Audit log yazılamadı: {str(e)}")
 
-# --- Dinamik Kural Motoru ---
+
+# --- DİNAMİK KURAL MOTORU (RULE ENGINE) ---
 class DynamicRuleEngine:
     @staticmethod
     def get_active_rule(unit: str) -> Dict[str, Any]:
-        default = {
+        default_rule = {
             "unit": unit,
             "base_multiplier": 1.0,
             "rounding_decimals": 2,
@@ -59,16 +62,18 @@ class DynamicRuleEngine:
             "is_active": True
         }
         if not supabase_client:
-            return default
+            return default_rule
+
         try:
             res = supabase_client.table("compliance_rules").select("*").eq("unit", unit).eq("is_active", True).execute()
-            if res.data:
+            if res.data and len(res.data) > 0:
                 return res.data[0]
-        except Exception:
-            pass
-        return default
+        except Exception as e:
+            logger.warning(f"Dinamik kural okunamadı: {str(e)}")
+        return default_rule
 
-# --- Reklam Kurulu 30 Günlük Fiyat Takibi ---
+
+# --- REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
 class ThirtyDayPriceTracker:
     @staticmethod
     def validate_discount_compliance(current_price: float, compare_at_price: float, price_history: Optional[List[float]] = None) -> Dict[str, Any]:
@@ -76,128 +81,158 @@ class ThirtyDayPriceTracker:
             return {
                 "is_discounted": False,
                 "status": "DÜZENLİ FİYAT",
-                "message": "İndirim yok.",
+                "message": "İndirim uygulanmıyor.",
                 "lowest_30_day_price": current_price
             }
-        lowest = min(price_history) if price_history else round(current_price * 0.95, 2)
-        claimed = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
-        compliant = compare_at_price >= lowest
+
+        lowest_30_day_price = min(price_history) if price_history else round(current_price * 0.95, 2)
+        claimed_discount = round(((compare_at_price - current_price) / compare_at_price) * 100, 1)
+        is_compliant = compare_at_price >= lowest_30_day_price
+
         return {
             "is_discounted": True,
-            "is_compliant": compliant,
-            "status": "REKLAM KURULU UYUMLU" if compliant else "İHLAL RİSKİ",
-            "claimed_discount_percent": claimed,
-            "lowest_30_day_price": lowest,
-            "message": f"Son 30 gün en düşük: {lowest} TL | Beyan: %{claimed}"
+            "is_compliant": is_compliant,
+            "status": "REKLAM KURULU UYUMLU" if is_compliant else "İHLAL RİSKİ (Fiyat Yükseltme)",
+            "claimed_discount_percent": claimed_discount,
+            "lowest_30_day_price": lowest_30_day_price,
+            "message": f"Son 30 Günün En Düşük Fiyatı: {lowest_30_day_price} TL | Beyan İndirim: %{claimed_discount}"
         }
 
-# --- KVKK & Çerez Politikası ---
+
+# --- KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
 class KVKKEngine:
     @staticmethod
     def generate_kvkk_notice(merchant_info: Dict[str, Any], store_domain: str) -> str:
-        company = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
-        tax = merchant_info.get("tax_number", "1234567890")
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        tax_number = merchant_info.get("tax_number", "1234567890")
         mersis = merchant_info.get("mersis_no", "0123456789000015")
-        address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A")
+        address = merchant_info.get("address", "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri")
         email = merchant_info.get("email", "destek@uyumhub.com")
+
         return f"""
         <!DOCTYPE html>
-        <html><head><meta charset="UTF-8"><title>KVKK Aydınlatma</title>
-        <style>body{{font-family:sans-serif;padding:25px;max-width:800px;margin:auto;}}</style>
-        </head><body>
-        <h1>KİŞİSEL VERİLERİN İŞLENMESİNE İLİŞKİN AYDINLATMA METNİ</h1>
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:12px;border-radius:8px;">
-        <strong>VERİ SORUMLUSU:</strong> {company}<br>
-        <strong>MERSİS:</strong> {mersis} | <strong>VERGİ NO:</strong> {tax}<br>
-        <strong>ADRES:</strong> {address}<br>
-        <strong>E-POSTA:</strong> {email} | <strong>ALAN ADI:</strong> {store_domain}
-        </div>
-        <p>Sipariş, fatura ve teslimat işlemleri kapsamında verileriniz KVKK 5/2 uyarınca işlenir.</p>
-        </body></html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <title>Kişisel Verilerin İşlenmesine İlişkin Aydınlatma Metni</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 25px; }}
+                h1 {{ font-size: 18px; text-align: center; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
+                .info-box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <h1>KİŞİSEL VERİLERİN İŞLENMESİNE İLİŞKİN AYDINLATMA METNİ</h1>
+            <div class="info-box">
+                <strong>VERİ SORUMLUSU:</strong> {company_name}<br>
+                <strong>MERSİS NO:</strong> {mersis} | <strong>VERGİ NO:</strong> {tax_number}<br>
+                <strong>ADRES:</strong> {address}<br>
+                <strong>İLETİŞİM E-POSTA:</strong> {email} | <strong>ALAN ADI:</strong> {store_domain}
+            </div>
+            <p>Sipariş süreçleri, faturalandırma ve teslimat işlemleri kapsamında kişisel verileriniz KVKK Madde 5/2 uyarınca işlenmektedir.</p>
+        </body>
+        </html>
         """
 
     @staticmethod
     def generate_cookie_policy(merchant_info: Dict[str, Any], store_domain: str) -> str:
-        company = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
         return f"""
         <!DOCTYPE html>
-        <html><head><meta charset="UTF-8"><title>Çerez Politikası</title></head>
-        <body style="font-family:sans-serif;padding:25px;max-width:800px;margin:auto;">
-        <h1>ÇEREZ POLİTİKASI</h1>
-        <p>{company} ({store_domain}) olarak çerez kullanımı hakkında sizi bilgilendiririz.</p>
-        </body></html>
+        <html lang="tr">
+        <head><meta charset="UTF-8"><title>Çerez Politikası</title></head>
+        <body style="font-family: sans-serif; padding: 25px; max-width: 800px; margin: 0 auto;">
+            <h1>ÇEREZ (COOKIE) POLİTİKASI</h1>
+            <p>{company_name} ("{store_domain}") olarak çerezlerin kullanımı hakkında sizleri bilgilendiriyoruz.</p>
+        </body>
+        </html>
         """
 
-# --- Uyumluluk Motoru (Birim Fiyat, Sertifika) ---
+
+# --- UYUMLULUK, SERTİFİKA VE SÖZLEŞME MOTORU ---
 class ComplianceEngine:
     @staticmethod
-    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", **kwargs):
+    def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", *args, **kwargs):
         qty = weight_or_volume or kwargs.get("weight") or 1.0
         try:
             price = float(price)
             qty = float(qty)
         except (ValueError, TypeError):
-            return {"has_error": True, "message": "Geçersiz fiyat/miktar"}
+            return {"has_error": True, "message": "Geçersiz fiyat veya miktar."}
+
         if qty <= 0:
-            return {"has_error": True, "message": "Miktar sıfırdan büyük olmalı"}
+            return {"has_error": True, "message": "Geçersiz miktar/hacim."}
+
         rule = DynamicRuleEngine.get_active_rule(unit)
         multiplier = float(rule.get("base_multiplier", 1.0))
         decimals = int(rule.get("rounding_decimals", 2))
         reg_version = rule.get("regulation_version", "TR-Standard")
-        base = (price / qty) * multiplier
-        rounded = round(base, decimals)
+
+        base_unit_price = (price / qty) * multiplier
+        rounded_price = round(base_unit_price, decimals)
+
         AuditLogger.log_event(store_domain, "UNIT_PRICE_CALCULATED", {
-            "price": price, "qty": qty, "unit": unit, "calculated": rounded, "rule": reg_version
+            "price": price, "qty": qty, "unit": unit, "calculated_unit_price": rounded_price, "rule_version": reg_version
         })
+
         return {
             "has_error": False,
-            "unit_price_formatted": f"{rounded:.{decimals}f} TL / {unit}",
-            "raw_unit_price": rounded,
-            "display_text": f"Birim Fiyatı: {rounded:.{decimals}f} TL/{unit}",
+            "unit_price_formatted": f"{rounded_price:.{decimals}f} TL / {unit}",
+            "raw_unit_price": rounded_price,
+            "display_text": f"Birim Fiyatı: {rounded_price:.{decimals}f} TL/{unit}",
             "applied_rule": reg_version
         }
 
     @staticmethod
     def generate_compliance_certificate(merchant_info: Dict[str, Any], store_domain: str) -> str:
-        company = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
-        tax = merchant_info.get("tax_number", "1234567890")
+        company_name = merchant_info.get("company_name", "UyumHub Test Mağazası A.Ş.")
+        tax_number = merchant_info.get("tax_number", "1234567890")
         mersis = merchant_info.get("mersis_no", "0123456789000015")
         issue_date = datetime.now().strftime("%d.%m.%Y")
-        cert_hash = hashlib.sha256(f"{store_domain}-{tax}-{issue_date}-UYUMHUB".encode()).hexdigest()[:24].upper()
+        cert_hash = hashlib.sha256(f"{store_domain}-{tax_number}-{issue_date}-UYUMHUB".encode()).hexdigest()[:24].upper()
+
         return f"""
         <!DOCTYPE html>
-        <html><head><meta charset="UTF-8"><title>Uyumluluk Sertifikası</title>
-        <style>body{{font-family:Georgia,serif;background:#fdfbf7;padding:40px;}}
-        .box{{max-width:800px;margin:auto;background:#fff;border:12px solid #1e293b;padding:50px;text-align:center;}}
-        </style></head>
-        <body><div class="box">
-        <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-        <p>İşbu belge, <strong>{company}</strong> ({store_domain}) işletmesinin Fiyat Etiketi Yönetmeliği, KVKK ve Mesafeli Satış standartlarına uyumlu olduğunu onaylar.</p>
-        <p><strong>MERSİS:</strong> {mersis} | <strong>Tarih:</strong> {issue_date}</p>
-        <p><strong>Kriptografik Mühür:</strong> {cert_hash}</p>
-        </div></body></html>
+        <html lang="tr">
+        <head><meta charset="UTF-8"><title>Resmi Mevzuat Uyumluluk Sertifikası</title></head>
+        <body style="font-family: Georgia, serif; background: #fdfbf7; color: #1e293b; padding: 40px;">
+            <div style="max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center;">
+                <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
+                <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
+                <h2>{company_name}</h2>
+                <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
+                <p><strong>Tarih:</strong> {issue_date} | <strong>Kriptografik Mühür:</strong> {cert_hash}</p>
+            </div>
+        </body>
+        </html>
         """
 
-# --- Trendyol Audit ---
+
+# --- TRENDYOL AUDIT ENGINE ---
 class TrendyolAuditEngine:
     @staticmethod
     def run_feed_audit(supplier_id: str) -> Dict[str, Any]:
+        audit_results = [
+            {"product": "Süzme Çiçek Balı 1000 gr", "sku": "TY-BAL-1000", "price": 450.0, "issue": "Birim fiyat etiketi eksik (6502/M.54)", "risk": "YÜKSEK", "penalty": "34.712 TL"},
+            {"product": "Zeytinyağı 500 ml", "sku": "TY-ZTY-500", "price": 220.0, "issue": "30 günlük en düşük fiyat referansı doğrulanmadı", "risk": "ORTA", "penalty": "34.712 TL"}
+        ]
         return {
             "supplier_id": supplier_id,
             "health_score": 60,
-            "total_issues": 2,
+            "total_issues": len(audit_results),
             "estimated_penalty_risk": "69.424 TL",
-            "issues": [
-                {"product": "Süzme Çiçek Balı 1000 gr", "sku": "TY-BAL-1000", "price": 450.0,
-                 "issue": "Birim fiyat etiketi eksik", "risk": "YÜKSEK", "penalty": "34.712 TL"},
-                {"product": "Zeytinyağı 500 ml", "sku": "TY-ZTY-500", "price": 220.0,
-                 "issue": "30 günlük en düşük fiyat referansı doğrulanmadı", "risk": "ORTA", "penalty": "34.712 TL"}
-            ],
+            "issues": audit_results,
             "scan_timestamp": datetime.now().strftime("%d.%m.%Y %H:%M")
         }
 
-# -------------------- FastAPI Uygulaması --------------------
-app = FastAPI(title="UyumHub - Mevzuat Platformu", version="2.7.2")
+
+# FastAPI Uygulaması
+app = FastAPI(
+    title="UyumHub - Mevzuat Platformu",
+    description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
+    version="3.0.0" # Standalone UI Mimarisi
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -206,18 +241,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Global middleware: iframe engellerini kaldır (HATA DÜZELTİLDİ) ---
+
 @app.middleware("http")
 async def disable_frame_restrictions(request: Request, call_next):
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = "frame-ancestors *;"
     response.headers["Access-Control-Allow-Origin"] = "*"
-    # 'pop' hatasını düzelt: del ile kaldır
-    if "X-Frame-Options" in response.headers:
-        del response.headers["X-Frame-Options"]
+    if "X-Frame-Options" in response.headers: del response.headers["X-Frame-Options"]
+    if "x-frame-options" in response.headers: del response.headers["x-frame-options"]
     return response
 
-# --- Pydantic modelleri (v2 uyumlu) ---
+
 class MerchantSettingsRequest(BaseModel):
     store_domain: str
     company_name: str
@@ -227,73 +261,113 @@ class MerchantSettingsRequest(BaseModel):
     phone: str
     email: str
 
-# --- Yardımcı fonksiyonlar ---
+
 def normalize_domain(raw_domain: Optional[str]) -> str:
-    if not raw_domain:
-        return "dev-mevzuattestmagaza.myikas.com"
+    if not raw_domain: return "dev-mevzuattestmagaza.myikas.com"
     raw_domain = str(raw_domain).strip().lower()
-    if "." not in raw_domain:
-        return f"{raw_domain}.myikas.com"
-    return raw_domain
+    return f"{raw_domain}.myikas.com" if "." not in raw_domain else raw_domain
+
 
 def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "ikas") -> tuple[bool, str]:
-    if not supabase_client:
-        return False, "Supabase bağlantısı yok"
-    data = {
-        "store_domain": domain,
-        "access_token": access_token,
-        "platform": platform,
-        "subscription_status": "trial",
-        "trial_ends_at": (datetime.utcnow() + timedelta(days=14)).isoformat(),
-        "company_name": "UyumHub Test Mağazası A.Ş.",
-        "tax_number": "1234567890",
-        "mersis_no": "0123456789000015",
-        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
-        "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com"
+    if not supabase_client: return False, "Supabase bağlantısı yok."
+    merchant_data = {
+        "store_domain": domain, "access_token": access_token, "platform": platform,
+        "subscription_status": "trial", "trial_ends_at": (datetime.utcnow() + timedelta(days=14)).isoformat(),
+        "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00", "email": "destek@uyumhub.com"
     }
     try:
-        supabase_client.table("merchants").upsert(data, on_conflict="store_domain").execute()
+        supabase_client.table("merchants").upsert(merchant_data, on_conflict="store_domain").execute()
         AuditLogger.log_event(domain, "MERCHANT_REGISTERED", {"platform": platform})
-        return True, "Başarılı"
+        return True, "Upsert başarılı"
     except Exception as e:
         return False, str(e)
 
+
 def get_merchant_profile(domain: str) -> Dict[str, Any]:
-    default = {
-        "company_name": "UyumHub Test Mağazası A.Ş.",
-        "tax_number": "1234567890",
-        "mersis_no": "0123456789000015",
-        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri",
-        "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com",
-        "subscription_status": "trial",
-        "platform": "ikas",
-        "plan": "UyumHub Full Mevzuat Paket"
+    default_profile = {
+        "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
+        "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas"
     }
-    if not supabase_client:
-        return default
+    if not supabase_client: return default_profile
     try:
         res = supabase_client.table("merchants").select("*").eq("store_domain", domain).execute()
         if res.data:
             m = res.data[0]
-            return {**default, **m}
-    except Exception:
-        pass
-    return default
+            return {
+                "company_name": m.get("company_name") or default_profile["company_name"],
+                "tax_number": m.get("tax_number") or default_profile["tax_number"],
+                "mersis_no": m.get("mersis_no") or default_profile["mersis_no"],
+                "address": m.get("address") or default_profile["address"],
+                "phone": m.get("phone") or default_profile["phone"],
+                "email": m.get("email") or default_profile["email"],
+                "subscription_status": m.get("subscription_status", "trial"),
+                "platform": m.get("platform", "ikas")
+            }
+    except Exception: pass
+    return default_profile
 
-# --- İKAS entegrasyonu için HTML dashboard (güncellenmiş postMessage) ---
+
+# --- YENİ EKLENEN: İKAS IFRAME İÇİNDE GÖSTERİLECEK "KÖPRÜ" BAŞLATICI SAYFA ---
+def build_launcher_html(storeDomain: str) -> str:
+    domain = normalize_domain(storeDomain)
+    return f"""
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>UyumHub'a Hoş Geldiniz</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+            .launcher-card {{ background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border: 1px solid #e2e8f0; max-width: 400px; width: 100%; }}
+            .logo-icon {{ background: #4f46e5; color: white; width: 60px; height: 60px; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 20px; font-weight: bold; }}
+            h1 {{ font-size: 20px; color: #0f172a; margin: 0 0 8px 0; }}
+            p {{ font-size: 14px; color: #64748b; margin: 0 0 24px 0; line-height: 1.5; }}
+            .btn-launch {{ display: inline-block; padding: 14px 28px; background: #4f46e5; color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 14px; transition: background 0.2s; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }}
+            .btn-launch:hover {{ background: #4338ca; }}
+        </style>
+        <script>
+            // İkas çarkını anında durduran hafif sinyal
+            function notifyIkasReady() {{
+                try {{
+                    window.parent.postMessage({{ type: "IKAS_APP_LOADED", loaded: true }}, "*");
+                    window.parent.postMessage("IKAS_APP_READY", "*");
+                }} catch(e) {{}}
+            }}
+            window.onload = notifyIkasReady;
+        </script>
+    </head>
+    <body>
+        <div class="launcher-card">
+            <div class="logo-icon">✓</div>
+            <h1>UyumHub Sistemine Bağlandı</h1>
+            <p>Mağazanız (<strong>{domain}</strong>) için mevzuat paneli hazır. Kısıtlamalara takılmadan yönetmek için paneli tam ekran açın.</p>
+            <a href="/dashboard?storeDomain={domain}" target="_blank" class="btn-launch">Paneli Yeni Sekmede Aç 🚀</a>
+        </div>
+    </body>
+    </html>
+    """
+
+
+# --- ANA DASHBOARD (ARTIK TAM EKRAN ÇALIŞACAK) ---
 def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
-    platform_name = profile.get("platform", "ikas")
-    is_dev_store = is_dev or "dev-" in domain or "test" in domain
+    platform_name = profile["platform"]
+    
+    is_developer_store = is_dev or ("dev-" in domain) or ("test" in domain)
 
-    dev_btn = ""
-    switch_btn = ""
-    if is_dev_store:
-        dev_btn = '<a href="/agency/dashboard" target="_blank" class="btn btn-dev">Dev: Ajans Paneli</a>'
-        switch_btn = '<button onclick="openStoreSwitchModal()" class="btn-switch">Değiştir</button>'
+    dev_tools_html = ""
+    switch_store_button_html = ""
+
+    if is_developer_store:
+        dev_tools_html = """
+        <a href="/agency/dashboard" target="_blank" class="btn btn-dev">Dev: Ajans Paneli</a>
+        """
+        switch_store_button_html = """
+        <button onclick="openStoreSwitchModal()" class="btn-switch">Değiştir</button>
+        """
 
     return f"""
     <!DOCTYPE html>
@@ -305,19 +379,19 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
             * {{ box-sizing: border-box; margin: 0; padding: 0; }}
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; padding: 24px; }}
             .container {{ max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }}
-            .header-card {{ background: #ffffff; border-radius: 16px; padding: 24px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
+            .header-card {{ background: #ffffff; border-radius: 16px; padding: 24px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex-wrap: wrap; gap: 16px; }}
             .brand-title {{ font-size: 20px; font-weight: 700; color: #0f172a; }}
             .brand-sub {{ font-size: 13px; color: #64748b; margin-top: 4px; display: flex; align-items: center; gap: 8px; }}
             .store-domain {{ font-weight: 600; color: #4f46e5; }}
             .btn-group {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
             .btn {{ padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; transition: all 0.2s; }}
-            .btn-primary {{ background: #4f46e5; color: #fff; }}
+            .btn-primary {{ background: #4f46e5; color: #ffffff; }}
             .btn-primary:hover {{ background: #4338ca; }}
-            .btn-pro {{ background: linear-gradient(135deg, #f59e0b, #ea580c); color: #fff; font-weight: 700; }}
-            .btn-teal {{ background: #0d9488; color: #fff; }}
-            .btn-sky {{ background: #0284c7; color: #fff; }}
-            .btn-orange {{ background: #ea580c; color: #fff; }}
-            .btn-purple {{ background: #9333ea; color: #fff; }}
+            .btn-pro {{ background: linear-gradient(135deg, #f59e0b, #ea580c); color: #ffffff; font-weight: 700; }}
+            .btn-teal {{ background: #0d9488; color: #ffffff; }}
+            .btn-sky {{ background: #0284c7; color: #ffffff; }}
+            .btn-orange {{ background: #ea580c; color: #ffffff; }}
+            .btn-purple {{ background: #9333ea; color: #ffffff; }}
             .btn-dev {{ background: #0f172a; color: #34d399; border: 1px solid #059669; font-weight: 700; }}
             .btn-switch {{ background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 2px 8px; border-radius: 6px; font-size: 11px; cursor: pointer; }}
             .badge {{ padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }}
@@ -331,24 +405,6 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
             .modal-content {{ background: #ffffff; border-radius: 16px; padding: 24px; max-width: 360px; width: 100%; display: flex; flex-direction: column; gap: 16px; }}
             .input {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 13px; }}
         </style>
-
-        <!-- GÜNCELLENMİŞ postMessage – Sade ve tekrarlı -->
-        <script>
-            (function() {{
-                window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
-                console.log("UyumHub: IKAS_APP_LOADED gönderildi.");
-                let count = 0;
-                const interval = setInterval(() => {{
-                    window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
-                    count++;
-                    if (count >= 5) clearInterval(interval);
-                }}, 200);
-            }})();
-
-            window.addEventListener("message", function(event) {{
-                window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
-            }});
-        </script>
     </head>
     <body>
         <div class="container">
@@ -357,12 +413,13 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
                     <h1 class="brand-title">UyumHub Mevzuat Suite</h1>
                     <div class="brand-sub">
                         Mağaza: <span class="store-domain">{domain}</span>
-                        {switch_btn}
+                        {switch_store_button_html}
                     </div>
                 </div>
+
                 <div class="btn-group">
                     <span class="badge">Platform: {platform_name}</span>
-                    {dev_btn}
+                    {dev_tools_html}
                     <button onclick="startCheckout()" class="btn btn-pro">PRO Plana Geç</button>
                     <a href="/api/v1/compliance/kvkk?storeDomain={domain}" target="_blank" class="btn btn-teal">KVKK</a>
                     <a href="/api/v1/compliance/cookie-policy?storeDomain={domain}" target="_blank" class="btn btn-sky">Çerez</a>
@@ -417,9 +474,11 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
             async function loadProducts() {{
                 const tbody = document.getElementById("products-table-body");
                 if (!tbody) return;
+
                 try {{
                     const res = await fetch(`/api/v1/compliance/sync-products?storeDomain=${{encodeURIComponent(storeDomain)}}`);
                     const data = await res.json();
+
                     if (data.status === "success" && data.products) {{
                         tbody.innerHTML = "";
                         data.products.forEach(prod => {{
@@ -437,62 +496,66 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
                             }});
                         }});
                     }}
-                }} catch (err) {{
+                }} catch (err) {{ 
                     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#ef4444;">Veri yükleme hatası.</td></tr>';
                 }}
             }}
 
             function startCheckout() {{ window.location.href = `/api/v1/billing/checkout?storeDomain=${{encodeURIComponent(storeDomain)}}`; }}
 
-            window.onload = function() {{
-                loadProducts();
-            }};
+            window.onload = loadProducts;
         </script>
     </body>
     </html>
     """
 
-# -------------------- ROUTE'LER --------------------
 
+# --- ROUTE 1: DASHBOARD ---
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     is_dev = request.query_params.get("dev") == "true"
     return HTMLResponse(content=build_dashboard_html(domain, is_dev=is_dev))
 
-# İKAS LAUNCH (APP URL)
+
+# --- ROUTE 2: İKAS LAUNCH & CALLBACK (BAŞLATICI SAYFAYI GÖSTERİR) ---
 @app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
 async def ikas_launch(request: Request):
-    params = dict(request.query_params)
-    code = params.get("code")
-    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
-    domain = normalize_domain(raw_domain)
+    try:
+        params = dict(request.query_params)
+        raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+        domain = normalize_domain(raw_domain)
+        # İkas iframe içinde büyük paneli değil, güvenli köprü/başlatıcı sayfayı göster
+        return HTMLResponse(content=build_launcher_html(domain))
+    except Exception as e:
+        return HTMLResponse(content=build_launcher_html("dev-mevzuattestmagaza.myikas.com"))
 
-    if code:
-        access_token = f"ikas_token_{code[:12]}"
-        save_merchant_to_supabase(domain, access_token, platform="ikas")
-    else:
-        save_merchant_to_supabase(domain, "ikas_token_dummy", platform="ikas")
 
-    return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
-
-# İKAS CALLBACK (OAuth sonrası)
 @app.get("/api/v1/ikas/callback", response_class=HTMLResponse)
 async def ikas_callback(request: Request):
-    params = dict(request.query_params)
-    code = params.get("code")
-    raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
-    domain = normalize_domain(raw_domain)
+    try:
+        params = dict(request.query_params)
+        code = params.get("code")
+        raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+        domain = normalize_domain(raw_domain)
 
-    if code:
-        access_token = f"ikas_token_{code[:12]}"
+        access_token = f"ikas_token_{code[:12]}" if code else "ikas_token_default"
         save_merchant_to_supabase(domain, access_token, platform="ikas")
-    else:
-        save_merchant_to_supabase(domain, "ikas_token_callback", platform="ikas")
+        return HTMLResponse(content=build_launcher_html(domain))
+    except Exception as e:
+        return HTMLResponse(content=build_launcher_html("dev-mevzuattestmagaza.myikas.com"))
 
-    return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
 
-# Diğer endpoint'ler (değişmedi)
+# --- ROUTE 3: SHOPIFY OS 2.0 BADGE ---
+@app.get("/api/v1/shopify/storefront/compliance-badge")
+async def get_shopify_storefront_badge(price: float, weight: float = 1.0, unit: str = "kg", storeDomain: str = "organikgurme.myshopify.com"):
+    domain = normalize_domain(storeDomain)
+    calc_res = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
+    badge_html = f'<div style="background:#f1f5f9; padding:6px 12px; border-radius:6px; font-weight:600;">{calc_res.get("display_text")}</div>'
+    return JSONResponse(content={"status": "success", "store": domain, "badge_html": badge_html})
+
+
+# --- ROUTE 4: DİĞER TÜM ENDPOINT'LER ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -500,33 +563,35 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
         profile = get_merchant_profile(domain)
         platform = profile.get("platform", "ikas").lower()
 
-        # Örnek ürünler (gerçek entegrasyonda client ile çekilir)
         products = [
             {"id": "prod_001", "name": "Ege Sızma Zeytinyağı 1000 ml", "variants": [{"id": "var_001", "sku": "ZTY-1L", "price": 380.00, "weight": 1.0, "unit": "L"}]},
             {"id": "prod_002", "name": "Organik Çam Balı 850 gr", "variants": [{"id": "var_002", "sku": "BAL-850G", "price": 425.00, "weight": 0.85, "unit": "kg"}]}
         ]
 
-        processed = []
+        processed_products = []
         for prod in products:
             variants_compliance = []
             for variant in prod.get("variants", []):
                 price = variant.get("price", 0.0)
                 weight = variant.get("weight", 1.0)
                 unit = variant.get("unit", "kg")
-                compliance = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
+                compliance_result = ComplianceEngine.calculate_unit_price(price, weight, unit, store_domain=domain)
+
                 variants_compliance.append({
                     "variant_id": variant.get("id"),
                     "sku": variant.get("sku"),
                     "price": price,
                     "weight": weight,
                     "unit": unit,
-                    "compliance": compliance
+                    "compliance": compliance_result
                 })
-            processed.append({"product_id": prod.get("id"), "product_name": prod.get("name"), "variants": variants_compliance})
 
-        return {"status": "success", "store": domain, "platform": platform, "products": processed}
+            processed_products.append({"product_id": prod.get("id"), "product_name": prod.get("name"), "variants": variants_compliance})
+
+        return {"status": "success", "store": domain, "platform": platform, "products": processed_products}
     except Exception as err:
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(err)})
+
 
 @app.get("/api/v1/compliance/kvkk", response_class=HTMLResponse)
 async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
@@ -534,11 +599,13 @@ async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com")
     profile = get_merchant_profile(domain)
     return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
 
+
 @app.get("/api/v1/compliance/cookie-policy", response_class=HTMLResponse)
 async def get_cookie_policy(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
     return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
+
 
 @app.get("/api/v1/compliance/certificate", response_class=HTMLResponse)
 async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
@@ -546,54 +613,51 @@ async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.m
     profile = get_merchant_profile(domain)
     return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
 
+
 @app.get("/audit/trendyol", response_class=HTMLResponse)
 async def render_trendyol_audit_page(supplierId: str = "123456"):
-    audit = TrendyolAuditEngine.run_feed_audit(supplierId)
-    return HTMLResponse(content=f"<div style='font-family:sans-serif;padding:40px;'><h1>Trendyol Audit</h1><p>Risk: {audit['estimated_penalty_risk']}</p></div>")
+    audit_data = TrendyolAuditEngine.run_feed_audit(supplierId)
+    return HTMLResponse(content=f"<div style='font-family:sans-serif; padding:40px;'><h1>Trendyol Audit Supplier: {supplierId}</h1><p>Risk: {audit_data['estimated_penalty_risk']}</p></div>")
+
 
 @app.get("/agency/dashboard", response_class=HTMLResponse)
 async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
-    return HTMLResponse(content="<div style='font-family:sans-serif;padding:40px;'><h1>Ajans Partner Programı</h1><p>Net Hakediş: $225.00/ay</p></div>")
+    return HTMLResponse(content="<div style='font-family:sans-serif; padding:40px;'><h1>Ajans Partner Programı Panel</h1><p>Net Hakediş: $225.00/ay</p></div>")
+
 
 @app.get("/api/v1/billing/checkout", response_class=HTMLResponse)
 async def billing_checkout(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
-    return HTMLResponse(content=f"<div style='font-family:sans-serif;padding:40px;'><h1>UyumHub Checkout - {domain}</h1><a href='/api/v1/billing/success?storeDomain={domain}'>Test Ödemesini Onayla</a></div>")
+    return HTMLResponse(content=f"<div style='font-family:sans-serif; padding:40px;'><h1>UyumHub Checkout - {domain}</h1><a href='/api/v1/billing/success?storeDomain={domain}'>Test Ödemesini Onayla</a></div>")
+
 
 @app.get("/api/v1/billing/success")
 async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     domain = normalize_domain(storeDomain)
     if supabase_client:
-        try:
-            supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
-        except Exception:
-            pass
+        try: supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
+        except Exception: pass
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
+
 
 @app.post("/api/v1/merchant/settings")
 async def update_merchant_settings(payload: MerchantSettingsRequest):
     if supabase_client:
         try:
-            # Pydantic v2'de dict() yerine model_dump() kullan
-            data = payload.model_dump()
-            supabase_client.table("merchants").update(data).eq("store_domain", payload.store_domain).execute()
+            update_data = {"company_name": payload.company_name, "tax_number": payload.tax_number, "mersis_no": payload.mersis_no, "address": payload.address, "phone": payload.phone, "email": payload.email}
+            supabase_client.table("merchants").update(update_data).eq("store_domain", payload.store_domain).execute()
             return {"status": "success"}
-        except Exception as e:
-            return {"status": "error", "detail": str(e)}
+        except Exception as e: return {"status": "error", "detail": str(e)}
     return {"status": "success"}
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def render_login_page():
-    return HTMLResponse(content="<div style='font-family:sans-serif;padding:40px;'><h1>UyumHub Giriş</h1><a href='/dashboard'>Panele Git</a></div>")
+    return HTMLResponse(content="<div style='font-family:sans-serif; padding:40px;'><h1>UyumHub Giriş</h1><a href='/dashboard'>Panele Git</a></div>")
+
 
 @app.get("/")
-async def root():
-    return RedirectResponse(url="/dashboard")
+async def root(): return RedirectResponse(url="/login")
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
