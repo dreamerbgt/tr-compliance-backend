@@ -1,11 +1,10 @@
 import os
 import json
 import logging
-import traceback
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from pydantic import BaseModel
@@ -198,7 +197,7 @@ class TrendyolAuditEngine:
         }
 
 # -------------------- FastAPI Uygulaması --------------------
-app = FastAPI(title="UyumHub - Mevzuat Platformu", version="2.7.1")
+app = FastAPI(title="UyumHub - Mevzuat Platformu", version="2.7.2")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -207,25 +206,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Global middleware: iframe engellerini kaldır ---
+# --- Global middleware: iframe engellerini kaldır (HATA DÜZELTİLDİ) ---
 @app.middleware("http")
 async def disable_frame_restrictions(request: Request, call_next):
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = "frame-ancestors *;"
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers.pop("X-Frame-Options", None)
+    # 'pop' hatasını düzelt: del ile kaldır
+    if "X-Frame-Options" in response.headers:
+        del response.headers["X-Frame-Options"]
     return response
 
-# --- Global exception handler ---
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Global hata: {str(exc)}\n{traceback.format_exc()}")
-    return JSONResponse(
-        status_code=500,
-        content={"status": "error", "detail": str(exc), "trace": traceback.format_exc()}
-    )
-
-# --- Pydantic modelleri ---
+# --- Pydantic modelleri (v2 uyumlu) ---
 class MerchantSettingsRequest(BaseModel):
     store_domain: str
     company_name: str
@@ -246,7 +238,6 @@ def normalize_domain(raw_domain: Optional[str]) -> str:
 
 def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "ikas") -> tuple[bool, str]:
     if not supabase_client:
-        logger.warning("Supabase bağlantısı yok, kayıt atlanıyor.")
         return False, "Supabase bağlantısı yok"
     data = {
         "store_domain": domain,
@@ -266,7 +257,6 @@ def save_merchant_to_supabase(domain: str, access_token: str, platform: str = "i
         AuditLogger.log_event(domain, "MERCHANT_REGISTERED", {"platform": platform})
         return True, "Başarılı"
     except Exception as e:
-        logger.error(f"Supabase kayıt hatası: {e}")
         return False, str(e)
 
 def get_merchant_profile(domain: str) -> Dict[str, Any]:
@@ -288,8 +278,8 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
         if res.data:
             m = res.data[0]
             return {**default, **m}
-    except Exception as e:
-        logger.error(f"Profil okuma hatası: {e}")
+    except Exception:
+        pass
     return default
 
 # --- İKAS entegrasyonu için HTML dashboard (güncellenmiş postMessage) ---
@@ -345,11 +335,8 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
         <!-- GÜNCELLENMİŞ postMessage – Sade ve tekrarlı -->
         <script>
             (function() {{
-                // İlk mesajı hemen gönder
                 window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
                 console.log("UyumHub: IKAS_APP_LOADED gönderildi.");
-
-                // Periyodik olarak tekrarla (5 kez, 200ms aralık)
                 let count = 0;
                 const interval = setInterval(() => {{
                     window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
@@ -358,7 +345,6 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
                 }}, 200);
             }})();
 
-            // Ayrıca her mesaj geldiğinde cevap ver
             window.addEventListener("message", function(event) {{
                 window.parent.postMessage({{ type: "IKAS_APP_LOADED" }}, "*");
             }});
@@ -470,53 +456,41 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    try:
-        domain = normalize_domain(storeDomain)
-        is_dev = request.query_params.get("dev") == "true"
-        return HTMLResponse(content=build_dashboard_html(domain, is_dev=is_dev))
-    except Exception as e:
-        logger.error(f"Dashboard hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>")
+    domain = normalize_domain(storeDomain)
+    is_dev = request.query_params.get("dev") == "true"
+    return HTMLResponse(content=build_dashboard_html(domain, is_dev=is_dev))
 
 # İKAS LAUNCH (APP URL)
 @app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
 async def ikas_launch(request: Request):
-    try:
-        params = dict(request.query_params)
-        code = params.get("code")
-        raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
-        domain = normalize_domain(raw_domain)
+    params = dict(request.query_params)
+    code = params.get("code")
+    raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+    domain = normalize_domain(raw_domain)
 
-        if code:
-            access_token = f"ikas_token_{code[:12]}"
-            save_merchant_to_supabase(domain, access_token, platform="ikas")
-        else:
-            save_merchant_to_supabase(domain, "ikas_token_dummy", platform="ikas")
+    if code:
+        access_token = f"ikas_token_{code[:12]}"
+        save_merchant_to_supabase(domain, access_token, platform="ikas")
+    else:
+        save_merchant_to_supabase(domain, "ikas_token_dummy", platform="ikas")
 
-        return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
-    except Exception as e:
-        logger.error(f"İkas launch hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>")
+    return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
 
 # İKAS CALLBACK (OAuth sonrası)
 @app.get("/api/v1/ikas/callback", response_class=HTMLResponse)
 async def ikas_callback(request: Request):
-    try:
-        params = dict(request.query_params)
-        code = params.get("code")
-        raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
-        domain = normalize_domain(raw_domain)
+    params = dict(request.query_params)
+    code = params.get("code")
+    raw_domain = params.get("state") or params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
+    domain = normalize_domain(raw_domain)
 
-        if code:
-            access_token = f"ikas_token_{code[:12]}"
-            save_merchant_to_supabase(domain, access_token, platform="ikas")
-        else:
-            save_merchant_to_supabase(domain, "ikas_token_callback", platform="ikas")
+    if code:
+        access_token = f"ikas_token_{code[:12]}"
+        save_merchant_to_supabase(domain, access_token, platform="ikas")
+    else:
+        save_merchant_to_supabase(domain, "ikas_token_callback", platform="ikas")
 
-        return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
-    except Exception as e:
-        logger.error(f"İkas callback hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p><pre>{traceback.format_exc()}</pre>")
+    return HTMLResponse(content=build_dashboard_html(domain, is_dev=True))
 
 # Diğer endpoint'ler (değişmedi)
 @app.get("/api/v1/compliance/sync-products")
@@ -552,47 +526,30 @@ async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
 
         return {"status": "success", "store": domain, "platform": platform, "products": processed}
     except Exception as err:
-        logger.error(f"Sync products hatası: {err}\n{traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(err)})
 
 @app.get("/api/v1/compliance/kvkk", response_class=HTMLResponse)
 async def get_kvkk_notice(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    try:
-        domain = normalize_domain(storeDomain)
-        profile = get_merchant_profile(domain)
-        return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
-    except Exception as e:
-        logger.error(f"KVKK hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p>")
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    return HTMLResponse(content=KVKKEngine.generate_kvkk_notice(profile, domain))
 
 @app.get("/api/v1/compliance/cookie-policy", response_class=HTMLResponse)
 async def get_cookie_policy(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    try:
-        domain = normalize_domain(storeDomain)
-        profile = get_merchant_profile(domain)
-        return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
-    except Exception as e:
-        logger.error(f"Çerez politikası hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p>")
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    return HTMLResponse(content=KVKKEngine.generate_cookie_policy(profile, domain))
 
 @app.get("/api/v1/compliance/certificate", response_class=HTMLResponse)
 async def get_compliance_certificate(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    try:
-        domain = normalize_domain(storeDomain)
-        profile = get_merchant_profile(domain)
-        return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
-    except Exception as e:
-        logger.error(f"Sertifika hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p>")
+    domain = normalize_domain(storeDomain)
+    profile = get_merchant_profile(domain)
+    return HTMLResponse(content=ComplianceEngine.generate_compliance_certificate(profile, domain))
 
 @app.get("/audit/trendyol", response_class=HTMLResponse)
 async def render_trendyol_audit_page(supplierId: str = "123456"):
-    try:
-        audit = TrendyolAuditEngine.run_feed_audit(supplierId)
-        return HTMLResponse(content=f"<div style='font-family:sans-serif;padding:40px;'><h1>Trendyol Audit</h1><p>Risk: {audit['estimated_penalty_risk']}</p></div>")
-    except Exception as e:
-        logger.error(f"Trendyol audit hatası: {e}\n{traceback.format_exc()}")
-        return HTMLResponse(content=f"<h1>Hata</h1><p>{str(e)}</p>")
+    audit = TrendyolAuditEngine.run_feed_audit(supplierId)
+    return HTMLResponse(content=f"<div style='font-family:sans-serif;padding:40px;'><h1>Trendyol Audit</h1><p>Risk: {audit['estimated_penalty_risk']}</p></div>")
 
 @app.get("/agency/dashboard", response_class=HTMLResponse)
 async def render_agency_dashboard(agencyCode: str = "AGENCY-TEKNOPARK"):
@@ -609,19 +566,19 @@ async def billing_success(storeDomain: str = "dev-mevzuattestmagaza.myikas.com")
     if supabase_client:
         try:
             supabase_client.table("merchants").update({"subscription_status": "active"}).eq("store_domain", domain).execute()
-        except Exception as e:
-            logger.error(f"Billing success güncelleme hatası: {e}")
+        except Exception:
+            pass
     return RedirectResponse(url=f"/dashboard?storeDomain={domain}")
 
 @app.post("/api/v1/merchant/settings")
 async def update_merchant_settings(payload: MerchantSettingsRequest):
     if supabase_client:
         try:
-            data = payload.model_dump()  # Pydantic v2 uyumlu
+            # Pydantic v2'de dict() yerine model_dump() kullan
+            data = payload.model_dump()
             supabase_client.table("merchants").update(data).eq("store_domain", payload.store_domain).execute()
             return {"status": "success"}
         except Exception as e:
-            logger.error(f"Merchant settings güncelleme hatası: {e}")
             return {"status": "error", "detail": str(e)}
     return {"status": "success"}
 
