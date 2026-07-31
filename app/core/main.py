@@ -3,6 +3,8 @@ import json
 import logging
 import traceback
 import hashlib
+import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, Request, HTTPException
@@ -32,7 +34,7 @@ if SUPABASE_URL and SUPABASE_KEY:
         logger.error(f"Supabase başlatma hatası: {str(e)}")
 
 
-# --- AUDIT TRAIL (BAKANLIK DENETİM İZİ) SERVİSİ ---
+# --- MODÜL 4: AUDIT TRAIL (BAKANLIK DENETİM İZİ) SERVİSİ ---
 class AuditLogger:
     @staticmethod
     def log_event(store_domain: str, event_type: str, details: Dict[str, Any]):
@@ -50,7 +52,7 @@ class AuditLogger:
                 logger.error(f"Audit log yazılamadı: {str(e)}")
 
 
-# --- DİNAMİK KURAL MOTORU (RULE ENGINE) ---
+# --- MODÜL 5: DİNAMİK KURAL MOTORU (RULE ENGINE) ---
 class DynamicRuleEngine:
     @staticmethod
     def get_active_rule(unit: str) -> Dict[str, Any]:
@@ -73,7 +75,7 @@ class DynamicRuleEngine:
         return default_rule
 
 
-# --- REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
+# --- MODÜL 8: REKLAM KURULU 30 GÜNLÜK EN DÜŞÜK FİYAT TAKİP MOTORU ---
 class ThirtyDayPriceTracker:
     @staticmethod
     def validate_discount_compliance(current_price: float, compare_at_price: float, price_history: Optional[List[float]] = None) -> Dict[str, Any]:
@@ -99,7 +101,7 @@ class ThirtyDayPriceTracker:
         }
 
 
-# --- KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
+# --- MODÜL 7: KVKK & ÇEREZ POLİTİKASI JENERATÖRÜ ---
 class KVKKEngine:
     @staticmethod
     def generate_kvkk_notice(merchant_info: Dict[str, Any], store_domain: str) -> str:
@@ -118,17 +120,21 @@ class KVKKEngine:
             <style>
                 body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1e293b; max-width: 800px; margin: 0 auto; padding: 25px; }}
                 h1 {{ font-size: 18px; text-align: center; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
+                h2 {{ font-size: 14px; color: #334155; margin-top: 20px; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; }}
+                p, li {{ font-size: 12px; text-align: justify; color: #475569; }}
                 .info-box {{ background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 12px; }}
             </style>
         </head>
         <body>
             <h1>KİŞİSEL VERİLERİN İŞLENMESİNE İLİŞKİN AYDINLATMA METNİ</h1>
+            <p><strong>6698 Sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") Uyarınca</strong></p>
             <div class="info-box">
                 <strong>VERİ SORUMLUSU:</strong> {company_name}<br>
                 <strong>MERSİS NO:</strong> {mersis} | <strong>VERGİ NO:</strong> {tax_number}<br>
                 <strong>ADRES:</strong> {address}<br>
                 <strong>İLETİŞİM E-POSTA:</strong> {email} | <strong>ALAN ADI:</strong> {store_domain}
             </div>
+            <h2>1. İŞLENEN KİŞİSEL VERİLERİNİZ VE İŞLEME AMACI</h2>
             <p>Sipariş süreçleri, faturalandırma ve teslimat işlemleri kapsamında kişisel verileriniz KVKK Madde 5/2 uyarınca işlenmektedir.</p>
         </body>
         </html>
@@ -149,7 +155,7 @@ class KVKKEngine:
         """
 
 
-# --- UYUMLULUK, SERTİFİKA VE SÖZLEŞME MOTORU ---
+# --- MODÜL 6: UYUMLULUK, SERTİFİKA VE SÖZLEŞME MOTORU ---
 class ComplianceEngine:
     @staticmethod
     def calculate_unit_price(price: float, weight_or_volume: float = None, unit: str = "kg", store_domain: str = "system", *args, **kwargs):
@@ -194,21 +200,41 @@ class ComplianceEngine:
         return f"""
         <!DOCTYPE html>
         <html lang="tr">
-        <head><meta charset="UTF-8"><title>Resmi Mevzuat Uyumluluk Sertifikası</title></head>
-        <body style="font-family: Georgia, serif; background: #fdfbf7; color: #1e293b; padding: 40px;">
-            <div style="max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center;">
-                <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
-                <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
-                <h2>{company_name}</h2>
-                <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
-                <p><strong>Tarih:</strong> {issue_date} | <strong>Kriptografik Mühür:</strong> {cert_hash}</p>
+        <head>
+            <meta charset="UTF-8">
+            <title>UyumHub - Resmi Mevzuat Uyumluluk Sertifikası</title>
+            <style>
+                body {{ font-family: 'Georgia', serif; background: #fdfbf7; color: #1e293b; padding: 40px; margin: 0; }}
+                .certificate-container {{ max-width: 800px; margin: 0 auto; background: #ffffff; border: 12px solid #1e293b; padding: 50px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }}
+                .inner-border {{ border: 2px solid #d4af37; padding: 40px; }}
+                h1 {{ font-size: 24px; color: #0f172a; text-transform: uppercase; margin-bottom: 5px; }}
+                .company-name {{ font-size: 26px; font-weight: bold; color: #1e293b; margin: 25px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; display: inline-block; min-width: 80%; }}
+                p {{ font-size: 13px; line-height: 1.8; color: #334155; max-width: 650px; margin: 0 auto 20px auto; }}
+                .details-box {{ display: flex; justify-content: space-around; margin: 30px 0; font-size: 12px; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; }}
+                .seal {{ font-size: 11px; color: #475569; font-family: monospace; background: #f1f5f9; padding: 10px; display: inline-block; border-radius: 4px; }}
+            </style>
+        </head>
+        <body>
+            <div class="certificate-container">
+                <div class="inner-border">
+                    <h1>RESMİ MEVZUAT UYUMLULUK SERTİFİKASI</h1>
+                    <p>İşbu sertifika, aşağıda unvanı belirtilen e-ticaret işletmesinin Fiyat Etiketi Yönetmeliği, 6698 Sayılı KVKK, Shopify OS 2.0 Standartları ve Mesafeli Satış Standartlarına uyumlu olduğunu onaylar.</p>
+                    <div class="company-name">{company_name}</div>
+                    <p><strong>Mağaza Domain:</strong> {store_domain} | <strong>MERSİS:</strong> {mersis}</p>
+                    <div class="details-box">
+                        <div><strong>Tarih:</strong> {issue_date}</div>
+                        <div><strong>Kural Motoru:</strong> TR-2026-V3</div>
+                        <div><strong>Durum:</strong> ONAYLI</div>
+                    </div>
+                    <div class="seal">Kriptografik Mühür: {cert_hash}</div>
+                </div>
             </div>
         </body>
         </html>
         """
 
 
-# --- TRENDYOL AUDIT ENGINE ---
+# --- MODÜL 9: TRENDYOL AUDIT ENGINE ---
 class TrendyolAuditEngine:
     @staticmethod
     def run_feed_audit(supplier_id: str) -> Dict[str, Any]:
@@ -230,7 +256,7 @@ class TrendyolAuditEngine:
 app = FastAPI(
     title="UyumHub - Mevzuat Platformu",
     description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
-    version="3.0.0" # Standalone UI Mimarisi
+    version="3.2.0" # Harici Panel + Tam Mimari
 )
 
 app.add_middleware(
@@ -288,7 +314,7 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
     default_profile = {
         "company_name": "UyumHub Test Mağazası A.Ş.", "tax_number": "1234567890", "mersis_no": "0123456789000015",
         "address": "Kayseri Teknopark İletişim Cad. No: 1/A Melikgazi/Kayseri", "phone": "0850 000 00 00",
-        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas"
+        "email": "destek@uyumhub.com", "subscription_status": "trial", "platform": "ikas", "plan": "UyumHub Full Mevzuat Paket"
     }
     if not supabase_client: return default_profile
     try:
@@ -303,54 +329,46 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
                 "phone": m.get("phone") or default_profile["phone"],
                 "email": m.get("email") or default_profile["email"],
                 "subscription_status": m.get("subscription_status", "trial"),
-                "platform": m.get("platform", "ikas")
+                "platform": m.get("platform", "ikas"),
+                "plan": "UyumHub Full Mevzuat Paket"
             }
     except Exception: pass
     return default_profile
 
 
-# --- YENİ EKLENEN: İKAS IFRAME İÇİNDE GÖSTERİLECEK "KÖPRÜ" BAŞLATICI SAYFA ---
+# ----------------------------------------------------------------------
+# KRİTİK GÜNCELLEME: İKAS İFRAME ZORLA KIRICI (AGGRESSIVE REDIRECT)
+# ----------------------------------------------------------------------
 def build_launcher_html(storeDomain: str) -> str:
     domain = normalize_domain(storeDomain)
+    # Bu HTML, İkas iframe'i içinde yüklendiği an ana pencereyi Standalone Dashboard'a fırlatır.
     return f"""
     <!DOCTYPE html>
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
-        <title>UyumHub'a Hoş Geldiniz</title>
-        <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-            .launcher-card {{ background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border: 1px solid #e2e8f0; max-width: 400px; width: 100%; }}
-            .logo-icon {{ background: #4f46e5; color: white; width: 60px; height: 60px; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 20px; font-weight: bold; }}
-            h1 {{ font-size: 20px; color: #0f172a; margin: 0 0 8px 0; }}
-            p {{ font-size: 14px; color: #64748b; margin: 0 0 24px 0; line-height: 1.5; }}
-            .btn-launch {{ display: inline-block; padding: 14px 28px; background: #4f46e5; color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 14px; transition: background 0.2s; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }}
-            .btn-launch:hover {{ background: #4338ca; }}
-        </style>
+        <title>UyumHub Yönlendirme</title>
         <script>
-            // İkas çarkını anında durduran hafif sinyal
-            function notifyIkasReady() {{
-                try {{
-                    window.parent.postMessage({{ type: "IKAS_APP_LOADED", loaded: true }}, "*");
-                    window.parent.postMessage("IKAS_APP_READY", "*");
-                }} catch(e) {{}}
+            try {{
+                if (window.top !== window.self) {{
+                    window.top.location.href = "{APP_BASE_URL}/dashboard?storeDomain={domain}";
+                }} else {{
+                    window.location.href = "/dashboard?storeDomain={domain}";
+                }}
+            }} catch (e) {{
+                window.location.href = "/dashboard?storeDomain={domain}";
             }}
-            window.onload = notifyIkasReady;
         </script>
     </head>
-    <body>
-        <div class="launcher-card">
-            <div class="logo-icon">✓</div>
-            <h1>UyumHub Sistemine Bağlandı</h1>
-            <p>Mağazanız (<strong>{domain}</strong>) için mevzuat paneli hazır. Kısıtlamalara takılmadan yönetmek için paneli tam ekran açın.</p>
-            <a href="/dashboard?storeDomain={domain}" target="_blank" class="btn-launch">Paneli Yeni Sekmede Aç 🚀</a>
-        </div>
+    <body style="background: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; color: #64748b;">
+        <p>UyumHub Mevzuat Paneli'ne yönlendiriliyorsunuz...</p>
     </body>
     </html>
     """
+# ----------------------------------------------------------------------
 
 
-# --- ANA DASHBOARD (ARTIK TAM EKRAN ÇALIŞACAK) ---
+# --- ANA DASHBOARD (ARTIK TAM EKRAN ÇALIŞACAK VE TÜM MODÜLLER BURADA) ---
 def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
     domain = normalize_domain(storeDomain)
     profile = get_merchant_profile(domain)
@@ -369,6 +387,12 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
         <button onclick="openStoreSwitchModal()" class="btn-switch">Değiştir</button>
         """
 
+    status_badge = f'<span class="badge">Platform: {platform_name}</span>'
+    if profile["subscription_status"] == "active":
+        status_badge += ' <span class="badge" style="background:#dcfce7; color:#15803d; border-color:#bbf7d0;">PRO (Aktif)</span>'
+    else:
+        status_badge += ' <span class="badge" style="background:#fef3c7; color:#b45309; border-color:#fde68a;">Deneme Süresi</span>'
+
     return f"""
     <!DOCTYPE html>
     <html lang="tr">
@@ -380,8 +404,8 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; color: #1e293b; padding: 24px; }}
             .container {{ max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }}
             .header-card {{ background: #ffffff; border-radius: 16px; padding: 24px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex-wrap: wrap; gap: 16px; }}
-            .brand-title {{ font-size: 20px; font-weight: 700; color: #0f172a; }}
-            .brand-sub {{ font-size: 13px; color: #64748b; margin-top: 4px; display: flex; align-items: center; gap: 8px; }}
+            .brand-title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }}
+            .brand-sub {{ font-size: 13px; color: #64748b; display: flex; align-items: center; gap: 8px; }}
             .store-domain {{ font-weight: 600; color: #4f46e5; }}
             .btn-group {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
             .btn {{ padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; text-decoration: none; border: none; cursor: pointer; display: inline-flex; align-items: center; transition: all 0.2s; }}
@@ -418,12 +442,12 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
                 </div>
 
                 <div class="btn-group">
-                    <span class="badge">Platform: {platform_name}</span>
+                    {status_badge}
                     {dev_tools_html}
                     <button onclick="startCheckout()" class="btn btn-pro">PRO Plana Geç</button>
                     <a href="/api/v1/compliance/kvkk?storeDomain={domain}" target="_blank" class="btn btn-teal">KVKK</a>
                     <a href="/api/v1/compliance/cookie-policy?storeDomain={domain}" target="_blank" class="btn btn-sky">Çerez</a>
-                    <a href="/audit/trendyol" class="btn btn-orange">Audit</a>
+                    <a href="/audit/trendyol" target="_blank" class="btn btn-orange">Audit</a>
                     <a href="/api/v1/compliance/certificate?storeDomain={domain}" target="_blank" class="btn btn-purple">Sertifika</a>
                     <button onclick="loadProducts()" class="btn btn-primary">Senkronize Et</button>
                 </div>
@@ -431,8 +455,10 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
 
             <div class="card">
                 <div class="card-header">
-                    <h2 class="card-title">Birim Fiyat Etiket Analizi</h2>
-                    <span style="font-size: 12px; color: #94a3b8;">Canlı Veri</span>
+                    <div>
+                        <h2 class="card-title">Birim Fiyat Etiket Analizi</h2>
+                        <span style="font-size: 12px; color: #94a3b8;">Canlı Veri</span>
+                    </div>
                 </div>
                 <table>
                     <thead>
@@ -446,7 +472,7 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
                         </tr>
                     </thead>
                     <tbody id="products-table-body">
-                        <tr><td colspan="6" style="text-align: center; color: #94a3b8;">Yükleniyor...</td></tr>
+                        <tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 30px;">Veriler yükleniyor...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -510,22 +536,14 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
     """
 
 
-# --- ROUTE 1: DASHBOARD ---
-@app.get("/dashboard", response_class=HTMLResponse)
-async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
-    domain = normalize_domain(storeDomain)
-    is_dev = request.query_params.get("dev") == "true"
-    return HTMLResponse(content=build_dashboard_html(domain, is_dev=is_dev))
-
-
-# --- ROUTE 2: İKAS LAUNCH & CALLBACK (BAŞLATICI SAYFAYI GÖSTERİR) ---
+# --- ROUTE 1: LAUNCH & CALLBACK (ZORLA YÖNLENDİREN "LAUNCHER" SAYFAYI ÇAĞIRIR) ---
 @app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
 async def ikas_launch(request: Request):
     try:
         params = dict(request.query_params)
         raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
         domain = normalize_domain(raw_domain)
-        # İkas iframe içinde büyük paneli değil, güvenli köprü/başlatıcı sayfayı göster
+        # Launcher sayfası İkas iframe içinde açılır ve derhal ana sekmeyi kırıp Dashboard'a gönderir
         return HTMLResponse(content=build_launcher_html(domain))
     except Exception as e:
         return HTMLResponse(content=build_launcher_html("dev-mevzuattestmagaza.myikas.com"))
@@ -546,6 +564,14 @@ async def ikas_callback(request: Request):
         return HTMLResponse(content=build_launcher_html("dev-mevzuattestmagaza.myikas.com"))
 
 
+# --- ROUTE 2: DASHBOARD (STANDALONE - TAM EKRAN AÇILAN YER) ---
+@app.get("/dashboard", response_class=HTMLResponse)
+async def render_dashboard(request: Request, storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
+    domain = normalize_domain(storeDomain)
+    is_dev = request.query_params.get("dev") == "true"
+    return HTMLResponse(content=build_dashboard_html(domain, is_dev=is_dev))
+
+
 # --- ROUTE 3: SHOPIFY OS 2.0 BADGE ---
 @app.get("/api/v1/shopify/storefront/compliance-badge")
 async def get_shopify_storefront_badge(price: float, weight: float = 1.0, unit: str = "kg", storeDomain: str = "organikgurme.myshopify.com"):
@@ -555,7 +581,7 @@ async def get_shopify_storefront_badge(price: float, weight: float = 1.0, unit: 
     return JSONResponse(content={"status": "success", "store": domain, "badge_html": badge_html})
 
 
-# --- ROUTE 4: DİĞER TÜM ENDPOINT'LER ---
+# --- ROUTE 4: DİĞER TÜM MODÜL ENDPOINT'LERİ ---
 @app.get("/api/v1/compliance/sync-products")
 async def sync_products(storeDomain: str = "dev-mevzuattestmagaza.myikas.com"):
     try:
@@ -657,7 +683,7 @@ async def render_login_page():
 
 
 @app.get("/")
-async def root(): return RedirectResponse(url="/login")
+async def root(): return RedirectResponse(url="/dashboard")
 
 @app.get("/health")
 async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
