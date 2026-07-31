@@ -256,7 +256,7 @@ class TrendyolAuditEngine:
 app = FastAPI(
     title="UyumHub - Mevzuat Platformu",
     description="B2B E-Ticaret Compliance-as-Infrastructure Servisi",
-    version="3.2.0" # Harici Panel + Tam Mimari
+    version="3.3.0" # Harici Panel + Popup Engeline Takılmayan Launcher
 )
 
 app.add_middleware(
@@ -337,31 +337,60 @@ def get_merchant_profile(domain: str) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------
-# KRİTİK GÜNCELLEME: İKAS İFRAME ZORLA KIRICI (AGGRESSIVE REDIRECT)
+# İKAS IFRAME İÇİNDE GÖSTERİLECEK POP-UP ENGELSİZ KÖPRÜ (LAUNCHER) SAYFASI
 # ----------------------------------------------------------------------
 def build_launcher_html(storeDomain: str) -> str:
     domain = normalize_domain(storeDomain)
-    # Bu HTML, İkas iframe'i içinde yüklendiği an ana pencereyi Standalone Dashboard'a fırlatır.
     return f"""
     <!DOCTYPE html>
     <html lang="tr">
     <head>
         <meta charset="UTF-8">
         <title>UyumHub Yönlendirme</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+            .launcher-card {{ background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border: 1px solid #e2e8f0; max-width: 400px; width: 100%; }}
+            .logo-icon {{ background: #4f46e5; color: white; width: 60px; height: 60px; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 20px; font-weight: bold; }}
+            h1 {{ font-size: 20px; color: #0f172a; margin: 0 0 8px 0; }}
+            p {{ font-size: 14px; color: #64748b; margin: 0 0 24px 0; line-height: 1.5; }}
+            
+            /* KULLANICININ TIKLAYACAĞI BUTON: TARAYICI BUNU POP-UP OLARAK GÖRMEZ */
+            .btn-launch {{ display: inline-block; padding: 14px 28px; background: #4f46e5; color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 14px; transition: background 0.2s; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); cursor: pointer; }}
+            .btn-launch:hover {{ background: #4338ca; }}
+        </style>
         <script>
-            try {{
-                if (window.top !== window.self) {{
-                    window.top.location.href = "{APP_BASE_URL}/dashboard?storeDomain={domain}";
-                }} else {{
-                    window.location.href = "/dashboard?storeDomain={domain}";
-                }}
-            }} catch (e) {{
-                window.location.href = "/dashboard?storeDomain={domain}";
+            // İKAS ÇARKINI ANINDA YOK EDEN AGRESİF SİNYAL BOMBARIDMANI
+            function forceIkasHandshake() {{
+                const payload = {{ type: "IKAS_APP_LOADED", loaded: true, ready: true, status: "ready" }};
+                try {{
+                    window.parent.postMessage(payload, "*");
+                    window.parent.postMessage("IKAS_APP_READY", "*");
+                    window.parent.postMessage("APP_LOADED", "*");
+                }} catch(e) {{}}
             }}
+            
+            // Sayfa yüklenir yüklenmez ve her ihtimale karşı sürekli sinyal gönder
+            window.addEventListener("message", function(event) {{ forceIkasHandshake(); }});
+            window.addEventListener("DOMContentLoaded", forceIkasHandshake);
+            window.addEventListener("load", forceIkasHandshake);
+            
+            let attempts = 0;
+            const timer = setInterval(function() {{
+                forceIkasHandshake();
+                attempts++;
+                if (attempts > 30) clearInterval(timer);
+            }}, 100);
         </script>
     </head>
-    <body style="background: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; color: #64748b;">
-        <p>UyumHub Mevzuat Paneli'ne yönlendiriliyorsunuz...</p>
+    <body>
+        <div class="launcher-card">
+            <div class="logo-icon">🚀</div>
+            <h1>UyumHub Paneli Hazır</h1>
+            <p>Eklenti sınırlarına ve tarayıcı engellerine takılmamak için uygulamayı tam ekran kullanın.</p>
+            
+            <!-- target="_blank" kullanıcının kendi isteğiyle tıkladığı bir işlem olduğu için POP-UP ENGELİNE ASLA TAKILMAZ -->
+            <a href="/dashboard?storeDomain={domain}" target="_blank" class="btn-launch">Paneli Yeni Sekmede Aç</a>
+        </div>
     </body>
     </html>
     """
@@ -536,14 +565,14 @@ def build_dashboard_html(storeDomain: str, is_dev: bool = False) -> str:
     """
 
 
-# --- ROUTE 1: LAUNCH & CALLBACK (ZORLA YÖNLENDİREN "LAUNCHER" SAYFAYI ÇAĞIRIR) ---
+# --- ROUTE 1: LAUNCH & CALLBACK (BUTONLU LAUNCHER SAYFAYI ÇAĞIRIR) ---
 @app.get("/api/v1/ikas/launch", response_class=HTMLResponse)
 async def ikas_launch(request: Request):
     try:
         params = dict(request.query_params)
         raw_domain = params.get("storeName") or params.get("storeDomain") or params.get("shop") or "dev-mevzuattestmagaza.myikas.com"
         domain = normalize_domain(raw_domain)
-        # Launcher sayfası İkas iframe içinde açılır ve derhal ana sekmeyi kırıp Dashboard'a gönderir
+        # Launcher sayfası İkas iframe içinde açılır, butona tıklandığında engelsiz yeni sekme açılır
         return HTMLResponse(content=build_launcher_html(domain))
     except Exception as e:
         return HTMLResponse(content=build_launcher_html("dev-mevzuattestmagaza.myikas.com"))
@@ -683,7 +712,7 @@ async def render_login_page():
 
 
 @app.get("/")
-async def root(): return RedirectResponse(url="/dashboard")
+async def root(): return RedirectResponse(url="/login")
 
 @app.get("/health")
 async def health(): return {"status": "healthy", "database": "connected" if supabase_client else "not_configured"}
